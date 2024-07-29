@@ -1,0 +1,68 @@
+---
+# defaults file for Horizon
+
+horizon_version: 2.5.7-1
+horizon_pkg_uri: "https://repo.evertrust.io/repository/horizon-rpm/horizon-{{ horizon_version }}.noarch.rpm"
+
+sonatype_username: test
+sonatype_pwd: test
+
+horizon_licence_src_path: ../roles/Horizon/templates/horizon.lic
+horizon_licence_dest_path: /opt/horizon/etc/horizon.lic
+nginx_certs_directory_path: /etc/nginx/ssl
+horizon_cert_key_size: 4096
+horizon_cert_key_type: RSA
+horizon_cert_C: FR
+horizon_cert_O: org
+horizon_cert_OU: ou
+horizon_cert_CN: cn
+horizon_hashing_algo: "sha256"
+path_to_template_default_horizon: ../templates/etc_default_horizon.j2
+path_to_template_etc_hosts: ../templates/etc_hosts.j2
+path_to_template_hosts_allowed: ../templates/hosts_allowed.j2
+path_to_default_horizon: /etc/default/horizon
+path_to_etc_hosts: /etc/hosts
+path_to_hosts_allowed: /opt/horizon/etc/conf.d/horizon-extra.conf
+
+horizon_generate_default_cert: true
+horizon_csr: "" #path to the web server certificate csr
+horizon_pem: "" #path to the web server certificate pem
+horizon_key: "" #path to the key
+horizon_chain_pem: "" #path to the certificate's trust chain
+
+horizon_custom_certs:
+  key:
+    src: "{{ horizon_key }}"
+    dest: "{{ [ nginx_certs_directory_path, 'horizon.key' ] | path_join }}"
+  pem:
+    src: "{{ horizon_pem }}"
+    dest: "{{ [ nginx_certs_directory_path, 'horizon.pem' ] | path_join }}"
+  csr:
+    src: "{{ horizon_csr }}"
+    dest: "{{ [ nginx_certs_directory_path, 'horizon.csr' ] | path_join }}"
+  chain_pem:
+    src: "{{ horizon_chain_pem }}"
+    dest: "{{ [ nginx_certs_directory_path, 'horizon-chain.pem' ] | path_join }}"
+
+mongodb_uri: "mongodb://horizon_db_admin:azerty@mongodb-database:27017/horizon?authSource=admin"
+
+horizon_hostname_node1: ansible-node1
+horizon_hostname_node2: ansible-node2
+horizon_hostname_node3: ansible-node3
+mongodb_hostname: mongodb-database
+mongodb_org_repo_uri: https://repo.mongodb.org/yum/redhat/9Server/mongodb-org/6.0/aarch64/RPMS/mongodb-mongosh-2.2.9.aarch64.rpm
+play_http_secret_key: test_play_secret
+horizon_default_ssv_key: test_ssv_key
+horizon_event_seal_secret: test_event_seal_secret
+
+horizon_dependencies_list:
+  - wget
+  - epel-release
+  - nginx
+  - postfix
+  - firewalld
+
+systemd_restart_list:
+  - postfix
+  - nginx
+  - horizon

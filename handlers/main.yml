@@ -1,0 +1,28 @@
+---
+
+- name: Horizon - Handlers - Restart postfix service
+  ansible.builtin.systemd:
+    name: postfix
+    state: restarted
+    enabled: yes
+  listen: "Horizon - Handlers - Restart postfix services"
+
+- name: Horizon - Handlers - Restart horizon service
+  ansible.builtin.systemd:
+    name: horizon
+    state: restarted
+    enabled: yes
+  listen: "Horizon - Handlers - Restart horizon services"
+
+- name: Horizon - nginx - Test Config
+  ansible.builtin.command: nginx -t
+  changed_when: false
+  listen: Horizon - Handlers - Restart nginx services
+  become: true
+
+- name: Horizon - nginx - Reload
+  ansible.builtin.service:
+    name: nginx
+    state: restarted
+  listen: Horizon - Handlers - Restart nginx services
+  become: true

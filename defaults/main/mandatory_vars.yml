@@ -1,0 +1,26 @@
+---
+# vars file for Horizon
+
+play_http_secret_key: test_play_secret
+horizon_default_ssv_key: test_ssv_key
+horizon_event_seal_secret: test_event_seal_secret
+
+horizon_version: 2.5.7-1
+horizon_pkg_uri: "https://repo.evertrust.io/repository/horizon-rpm/horizon-{{ horizon_version }}.noarch.rpm"
+sonatype_username: test
+sonatype_pwd: test
+
+horizon_licence_src_path: ../roles/Horizon/templates/horizon.lic
+
+mongodb_uri: "mongodb://horizon_db_admin:azerty@mongodb-database:27017/horizon?authSource=admin"
+mongodb_org_repo_uri: https://repo.mongodb.org/yum/redhat/9Server/mongodb-org/6.0/aarch64/RPMS/mongodb-mongosh-2.2.9.aarch64.rpm
+
+horizon_hostname_node1: ansible-node1
+horizon_hostname_node2: ansible-node2
+horizon_hostname_node3: ansible-node3
+mongodb_hostname: mongodb-database
+load_balancer_hostname: load_balancer
+
+
+
+

@@ -1,0 +1,13 @@
+---
+
+- name: Launching - Start postfix service
+  ansible.builtin.systemd:
+    name: postfix
+    state: started
+    enabled: yes
+
+- name: Launching - Start Horizon service
+  ansible.builtin.systemd:
+    name: horizon
+    state: started
+    enabled: yes

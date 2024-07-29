@@ -1,0 +1,13 @@
+---
+
+- name: Installation for Enterprise Linux OS
+  include_tasks: enterprise_linux_OS_install.yml
+
+- name: Generate and/or config the Nginx certs
+  include_tasks: nginx_certs.yml
+
+- name: Edit config files
+  include_tasks: config.yml
+
+- name: Launch Horizon and its necessary services
+  include_tasks: launching.yml

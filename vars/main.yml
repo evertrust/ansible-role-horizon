@@ -1,0 +1,20 @@
+---
+horizon_custom_certs:
+  key:
+    src: "{{ horizon_key }}"
+    dest: "{{ [ nginx_certs_directory_path, 'horizon.key' ] | path_join }}"
+  pem:
+    src: "{{ horizon_pem }}"
+    dest: "{{ [ nginx_certs_directory_path, 'horizon.pem' ] | path_join }}"
+  csr:
+    src: "{{ horizon_csr }}"
+    dest: "{{ [ nginx_certs_directory_path, 'horizon.csr' ] | path_join }}"
+  chain_pem:
+    src: "{{ horizon_chain_pem }}"
+    dest: "{{ [ nginx_certs_directory_path, 'horizon-chain.pem' ] | path_join }}"
+
+
+
+
+
+

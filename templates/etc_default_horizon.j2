@@ -1,0 +1,32 @@
+# JVM variables
+JVM_MIN_MEMORY=2048m
+JVM_MAX_MEMORY=3072m
+JVM_TYPE=server
+
+# Play variables
+PLAY_HTTP_PORT=9000
+PLAY_HTTP_ADDRESS=127.0.0.1
+PLAY_CONFIG_FILE=/opt/horizon/etc/horizon.conf
+PLAY_LOGGER_FILE=/opt/horizon/etc/horizon-logback.xml
+PLAY_PID_FILE=/opt/horizon/var/run/horizon.pid
+PLAY_HTTP_SECRET_KEY={{ play_http_secret_key  }}
+
+# Mongo variables
+MONGODB_URI="{{ mongodb_uri }}"
+
+# Horizon variables
+HORIZON_NOTIFICATION_SMTP_HOST=127.0.0.1
+HORIZON_HOSTNAME={{ horizon_hostname_node }}
+HORIZON_DEFAULT_SSV_KEY={{ horizon_default_ssv_key }}
+HORIZON_EVENT_SEAL_SECRET={{ horizon_event_seal_secret  }}
+
+# Akka nodes for HA
+# All HA nodes in hostname:port format, comma separated
+AKKA_DISCOVERY_ENDPOINTS={{ horizon_hostname_node1 }}:8558,{{ horizon_hostname_node2 }}:8558,{{ horizon_hostname_node3 }}:8558
+# The index of this machine's node in the above list. Index starts at 0
+AKKA_MANAGEMENT_LOCAL={{ node_number }}
+# The port used for communication between nodes, in hostname:port format
+AKKA_ARTERY={{ horizon_hostname_node }}:25520
+
+# x509 authentication header
+CERTIFICATE_HEADER=SSL_CLIENT_CERT

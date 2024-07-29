@@ -1,0 +1,47 @@
+---
+
+- name: Enterprise_linux_OS_install - Install prerequisites packages
+  ansible.builtin.yum:
+    name: "{{ horizon_dependencies_list }}"
+    state: present
+    update_cache: true
+
+- name: Enterprise_linux_OS_install - Check SELinux status
+  command: getenforce
+  register: selinux_status
+
+- name: Enterprise_linux_OS_install - Set SELinux to permissive mode if it is enforcing
+  command: setsebool -P httpd_can_network_connect 1
+  when: selinux_status['stdout'] == "Enforcing"
+
+- name: Enterprise_linux_OS_install - Temporary directory creation
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: horizon_
+  register: horizon_temp_install_directory
+
+- name: Enterprise_linux_OS_install - Download Horizon's rpm
+  ansible.builtin.get_url:
+    url: "{{ horizon_pkg_uri }}"
+    dest: "{{ horizon_temp_install_directory['path'] }}"
+    username: "{{ sonatype_username }}"
+    password: '{{ sonatype_pwd }}'
+
+- name: Enterprise_linux_OS_install - Install Horizon's rpm
+  ansible.builtin.yum:
+    name: "{{ [ horizon_temp_install_directory['path'], (horizon_pkg_uri | basename) ] | path_join }}"
+    state: present
+    disable_gpg_check: yes
+  become: yes
+
+- name: Enterprise_linux_OS_install - Download mongodb-mongosh RPM
+  ansible.builtin.get_url:
+    url: "{{ mongodb_org_repo_uri }}"
+    dest: "{{ [ horizon_temp_install_directory['path'], (mongodb_org_repo_uri | basename) ] | path_join }}"
+
+- name: Enterprise_linux_OS_install - Install MongoDB RPMs
+  ansible.builtin.yum:
+    name: "{{ [ horizon_temp_install_directory['path'], (mongodb_org_repo_uri | basename) ] | path_join }}"
+    state: present
+    disable_gpg_check: yes
+    skip_broken: yes
