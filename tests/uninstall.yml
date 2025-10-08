@@ -1,0 +1,63 @@
+---
+- name: Uninstall Horizon
+  hosts: horizon_cluster
+  become: true
+  gather_facts: true
+  
+  tasks:
+    - name: Stop Horizon service
+      ansible.builtin.systemd:
+        name: horizon
+        state: stopped
+      ignore_errors: yes
+    
+    - name: Stop nginx service
+      ansible.builtin.systemd:
+        name: nginx
+        state: stopped
+      ignore_errors: yes
+    
+    - name: Stop postfix service
+      ansible.builtin.systemd:
+        name: postfix
+        state: stopped
+      ignore_errors: yes
+    
+    - name: Remove Horizon RPM
+      ansible.builtin.yum:
+        name: horizon
+        state: absent
+    
+    - name: Remove Horizon directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /opt/horizon
+        - /etc/default/horizon
+        - /etc/nginx/conf.d/horizon.conf
+        - /etc/nginx/ssl/horizon.key
+        - /etc/nginx/ssl/horizon.pem
+        - /etc/nginx/ssl/horizon.csr
+        - /etc/nginx/ssl/horizon-chain.pem
+    
+    - name: Remove Horizon entries from /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: "{{ item }}"
+        state: absent
+      loop:
+        - "horizon-node"
+        - "mongodb"
+    
+    - name: Remove firewall rules
+      ansible.posix.firewalld:
+        port: "{{ item }}"
+        permanent: yes
+        state: disabled
+        immediate: yes
+      loop:
+        - 443/tcp
+        - 7626/tcp
+        - 17335/tcp
+      ignore_errors: yes
