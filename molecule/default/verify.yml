@@ -1,0 +1,59 @@
+---
+- name: Verify
+  hosts: horizon_nodes
+  gather_facts: true
+  tasks:
+    - name: Check if Horizon is installed
+      ansible.builtin.stat:
+        path: /opt/horizon
+      register: horizon_dir
+
+    - name: Assert Horizon directory exists
+      ansible.builtin.assert:
+        that:
+          - horizon_dir.stat.exists
+          - horizon_dir.stat.isdir
+        fail_msg: "Horizon installation directory does not exist"
+        success_msg: "Horizon is installed"
+
+    - name: Check Horizon configuration file
+      ansible.builtin.stat:
+        path: /opt/horizon/etc/horizon.conf
+      register: horizon_conf
+
+    - name: Assert Horizon config exists
+      ansible.builtin.assert:
+        that:
+          - horizon_conf.stat.exists
+        fail_msg: "Horizon configuration file does not exist"
+        success_msg: "Horizon configuration file exists"
+
+    - name: Check Horizon environment file
+      ansible.builtin.stat:
+        path: /etc/default/horizon
+      register: horizon_env
+
+    - name: Assert Horizon environment file exists
+      ansible.builtin.assert:
+        that:
+          - horizon_env.stat.exists
+        fail_msg: "Horizon environment file does not exist"
+        success_msg: "Horizon environment file exists"
+
+    - name: Verify PEKKO_DISCOVERY_ENDPOINTS contains all nodes
+      ansible.builtin.shell: |
+        grep "PEKKO_DISCOVERY_ENDPOINTS" /etc/default/horizon
+      register: PEKKO_endpoints
+      changed_when: false
+
+# Make sure to adjust the number of hostnames based on the nodes configured
+    - name: Assert all nodes are in PEKKO discovery
+      ansible.builtin.assert:
+        that:
+          - "'horizon-node1:7626' in PEKKO_endpoints.stdout"
+          - "'horizon-node2:7626' in PEKKO_endpoints.stdout"
+        #  - "'horizon-node3:7626' in PEKKO_endpoints.stdout"
+        #  - "'horizon-node4:7626' in PEKKO_endpoints.stdout"
+        #  - "'horizon-node5:7626' in PEKKO_endpoints.stdout"
+        fail_msg: "Not all nodes are configured in PEKKO_DISCOVERY_ENDPOINTS"
+        success_msg: "All nodes are properly configured in PEKKO discovery"
