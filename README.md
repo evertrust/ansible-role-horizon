@@ -29,6 +29,20 @@ It is necessary to:
 
 3. **Dynamic Inventory:** The role includes a dynamic inventory script at `tests/inventory.py` that automatically generates the Ansible inventory from your `mandatory_vars.yml` configuration. The script sets appropriate connection parameters and maps hostnames to IP addresses, eliminating manual inventory management.
 
+4. **Licence File Setup**
+Before deployment, you must provide a valid Horizon licence file. Create the required directories and place your licence file:
+```bash
+# For Molecule testing
+mkdir -p molecule/default/files
+cp /path/to/your/horizon.lic molecule/default/files/horizon2.lic
+
+# For VM deployment
+mkdir -p tests/files
+cp /path/to/your/horizon.lic tests/files/horizon2.lic
+```
+
+Note: The files/ directories are not included in the repository and must be created before running the role.
+
 ### Firewall Configuration
 
 **IMPORTANT:** This role automatically configures firewalld with the necessary ports. The following ports are opened:
@@ -53,9 +67,9 @@ The following table regroups the data that you have to provide the Ansible role 
 
 | Key | Value Type |
 |-----|------------|
-| `horizon_play_http_secret_key` | 32 characters string, no special character |
-| `horizon_default_ssv_key` | 32 characters string, no special character |
-| `horizon_event_seal_secret` | 32 characters string, no special character |
+| `horizon_play_http_secret_key` | String (32+ characters), alphanumeric only |
+| `horizon_default_ssv_key` | String (32+ characters), alphanumeric only |
+| `horizon_event_seal_secret` | String (32+ characters), alphanumeric only |
 | `horizon_version` | Horizon version (e.g., `2.7.9-1`) |
 | `horizon_pkg_uri` | URL where you store the Horizon RPM |
 | `horizon_repository_username` | Username to authenticate to this URL |
@@ -66,6 +80,8 @@ The following table regroups the data that you have to provide the Ansible role 
 | `horizon_mongodb_hostname` | Hostname of your MongoDB instance |
 | `horizon_mongodb_ip` | IP address of your MongoDB instance |
 | `horizon_nodes` | List of Horizon nodes with hostname and IP (see below) |
+| `horizon_pekko_discovery_port` | Port for Pekko cluster discovery (default: 7626) |
+| `horizon_pekko_artery_port` | Port for Pekko cluster communication (default: 17335) |
 
 **Horizon Nodes Configuration:**
 
@@ -226,10 +242,6 @@ Here is a basic way of using this role:
   hosts: horizon_cluster
   become: true
   gather_facts: true
-  vars_files:
-    - defaults/main/default_values.yml
-    - defaults/main/mandatory_vars.yml
-    - vars/main.yml
   roles:
     - role: horizon
 ```
@@ -275,7 +287,7 @@ sudo systemctl status horizon
 sudo firewall-cmd --list-all
 
 # For HA: Check Pekko cluster configuration
-grep "Pekko_DISCOVERY_ENDPOINTS" /etc/default/horizon
+grep "PEKKO_DISCOVERY_ENDPOINTS" /etc/default/horizon
 
 # Check Horizon logs
 sudo journalctl -u horizon -f
