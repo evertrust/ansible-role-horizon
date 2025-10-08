@@ -3,7 +3,7 @@
 ##If no certificate has been set up in variables
 - name: Nginx_certs - Ensure SSL directory exists
   ansible.builtin.file:
-    path: "{{ nginx_certs_directory_path }}"
+    path: "{{ horizon_cert_directory_path }}"
     state: directory
     mode: '0755'
 
@@ -13,8 +13,8 @@
 
 - name: Nginx_certs - Generate OpenSSL key - default
   ansible.builtin.command:
-    cmd: "openssl genpkey -algorithm {{ horizon_cert_key_type }} -out {{ [nginx_certs_directory_path, 'horizon.key'] | path_join }} -pkeyopt rsa_keygen_bits:{{ horizon_cert_key_size }}"
-    creates: "{{ [nginx_certs_directory_path, 'horizon.key'] | path_join }}"
+    cmd: "openssl genpkey -algorithm {{ horizon_cert_key_type }} -out {{ [horizon_cert_directory_path, 'horizon.key'] | path_join }} -pkeyopt rsa_keygen_bits:{{ horizon_cert_key_size }}"
+    creates: "{{ [horizon_cert_directory_path, 'horizon.key'] | path_join }}"
   when: horizon_generate_default_cert == true
   notify: "Horizon - Handlers - Restart nginx services"
   register: generate_key
@@ -22,9 +22,9 @@
 - name: Nginx_certs - Generate OpenSSL CSR - default
   ansible.builtin.command:
     cmd: >
-      openssl req -new -key {{ [nginx_certs_directory_path, 'horizon.key'] | path_join }} -out {{ [nginx_certs_directory_path, 'horizon.csr'] | path_join }}
-      -subj "/C={{ horizon_cert_C }}/O={{ horizon_cert_O }}/OU={{ horizon_cert_OU }}/CN={{ horizon_cert_CN }}"
-    creates: "{{ [nginx_certs_directory_path, 'horizon.csr'] | path_join }}"
+      openssl req -new -key {{ [horizon_cert_directory_path, 'horizon.key'] | path_join }} -out {{ [horizon_cert_directory_path, 'horizon.csr'] | path_join }}
+      -subj "/C={{ horizon_cert_country }}/O={{ horizon_cert_organization }}/OU={{ horizon_cert_organizational_unit }}/CN={{ horizon_cert_common_name }}"
+    creates: "{{ [horizon_cert_directory_path, 'horizon.csr'] | path_join }}"
   when: horizon_generate_default_cert == true
   notify: "Horizon - Handlers - Restart nginx services"
   register: generate_csr
@@ -32,18 +32,18 @@
 - name: Nginx_certs - Self-sign the certificate - default
   ansible.builtin.command:
     cmd: >
-      openssl x509 -req -days 365 -in {{ [nginx_certs_directory_path, 'horizon.csr'] | path_join }}
-      -signkey {{ [nginx_certs_directory_path, 'horizon.key'] | path_join }} -out {{ [nginx_certs_directory_path, 'horizon.pem'] | path_join }}
-      -set_serial 01 -days 365 -sha256
-    creates: "{{ [nginx_certs_directory_path, 'horizon.pem'] | path_join }}"
+      openssl x509 -req -days 365 -in {{ [horizon_cert_directory_path, 'horizon.csr'] | path_join }}
+      -signkey {{ [horizon_cert_directory_path, 'horizon.key'] | path_join }} -out {{ [horizon_cert_directory_path, 'horizon.pem'] | path_join }}
+      -set_serial 01 -days 365 -{{ horizon_cert_hashing_algo }}
+    creates: "{{ [horizon_cert_directory_path, 'horizon.pem'] | path_join }}"
   when: horizon_generate_default_cert == true
   notify: "Horizon - Handlers - Restart nginx services"
   register: sign_certificate
 
 - name: Nginx_certs - Create the certificate chain file - default
   ansible.builtin.copy:
-    src: "{{ [nginx_certs_directory_path, 'horizon.pem'] | path_join }}"
-    dest: "{{ [nginx_certs_directory_path, 'horizon-chain.pem'] | path_join }}"
+    src: "{{ [horizon_cert_directory_path, 'horizon.pem'] | path_join }}"
+    dest: "{{ [horizon_cert_directory_path, 'horizon-chain.pem'] | path_join }}"
     force: yes
     remote_src: yes
   register: chain_pem_created

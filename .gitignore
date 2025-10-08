@@ -1,0 +1,4 @@
+# Licence files - never commit these!
+*.lic
+!horizon-test.lic
+.DS_Store

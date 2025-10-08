@@ -1,26 +1,52 @@
 ---
-# vars file for Horizon
+# Horizon mandatory variables - change these to your own secure values
 
-play_http_secret_key: test_play_secret
-horizon_default_ssv_key: test_ssv_key
-horizon_event_seal_secret: test_event_seal_secret
+# Firewall configuration
+horizon_configure_firewall: true # Set to true to configure firewall rules, false to skip firewall configuration
 
-horizon_version: 2.5.7-1
+# Horizon secret keys - generate secure random keys for your deployment, if you want to use custom keys, replace the openssl commands with your own keys
+horizon_play_http_secret_key: "CHANGE_THIS_horizon_play_http_secret_key"
+horizon_default_ssv_key: "CHANGE_THIS_horizon_default_ssv_key"
+horizon_event_seal_secret: "CHANGE_THIS_horizon_event_seal_secret"
+
+# Horizon Package installation
+horizon_version: 2.7.9-1
 horizon_pkg_uri: "https://repo.evertrust.io/repository/horizon-rpm/horizon-{{ horizon_version }}.noarch.rpm"
-sonatype_username: test
-sonatype_pwd: test
+horizon_repository_username: "CHANGE_THIS_repo_user"
+horizon_repository_password: "CHANGE_THIS_repo_password"
 
-horizon_licence_src_path: ../roles/Horizon/templates/horizon.lic
+# Licence file source path
+horizon_licence_src_path: "{{ playbook_dir }}/files/horizon2.lic"
 
-mongodb_uri: "mongodb://horizon_db_admin:azerty@mongodb-database:27017/horizon?authSource=admin"
-mongodb_org_repo_uri: https://repo.mongodb.org/yum/redhat/9Server/mongodb-org/6.0/aarch64/RPMS/mongodb-mongosh-2.2.9.aarch64.rpm
+# Cluster nodes configuration - change these to match your environment
+# Set the hostname and IP address for each Horizon node in your cluster
+# For testing with Molecule, these values will be overridden in molecule.yml
+horizon_nodes:
+  - hostname: horizon-node1
+    ip: 10.10.21.1  # Change to your actual IP
+  - hostname: horizon-node2
+    ip: 10.10.21.2 # Change to your actual IP
+#  - hostname: horizon-node3
+#    ip: 10.10.21.3
+#  - hostname: horizon-node4
+#    ip: 10.10.21.4
+#  - hostname: horizon-node5
+#    ip: 10.10.21.5
 
-horizon_hostname_node1: ansible-node1
-horizon_hostname_node2: ansible-node2
-horizon_hostname_node3: ansible-node3
-mongodb_hostname: mongodb-database
-load_balancer_hostname: load_balancer
+# MongoDB configuration
+# MongoDB Shell package URI, as for now, we only support MongoDB 7.0 and 8.0.
+# Example format: mongodb://username:password@mongodb-host:27017/horizon?authSource=admin # Adjust as needed
+horizon_mongodb_uri: "mongodb://horizon:evertrust123@10.10.21.6:27017/horizon?authSource=admin"  # Set your MongoDB connection URI
+horizon_mongodb_shell_package_uri: https://repo.mongodb.org/yum/redhat/9Server/mongodb-org/8.0/aarch64/RPMS/mongodb-mongosh-2.5.8.aarch64.rpm 
+horizon_mongodb_hostname: mongodb-vm
+horizon_mongodb_ip: 10.10.21.6  # Change to your MongoDB server IP
 
+# Pekko/Akka cluster communication ports
+# These ports must be open between all nodes in the cluster
+horizon_pekko_discovery_port: 7626   # Pekko Management HTTP port (for discovery and health checks)
+horizon_pekko_artery_port: 17335     # Pekko Artery port (for cluster communication)
 
-
-
+# Load balancer configuration - change these to match your environment
+horizon_use_load_balancer: false  # Set to true if using a load balancer in front of Horizon nodes
+horizon_load_balancer_hostname: load_balancer
+horizon_load_balancer_ip: 10.10.21.7  # Change to your load balancer IP

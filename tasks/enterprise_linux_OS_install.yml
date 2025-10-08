@@ -9,39 +9,62 @@
 - name: Enterprise_linux_OS_install - Check SELinux status
   command: getenforce
   register: selinux_status
+  changed_when: false  # This command does not change system state
 
-- name: Enterprise_linux_OS_install - Set SELinux to permissive mode if it is enforcing
-  command: setsebool -P httpd_can_network_connect 1
+- name: Enterprise_linux_OS_install - Set SELinux  if it is enforcing
+  command: setsebool -P httpd_can_network_connect 1 # Allow httpd to make network connections, which is needed for accessing Horizon's UI 
   when: selinux_status['stdout'] == "Enforcing"
+
+- name: Enterprise_linux_OS_install - Check if Horizon RPM is already installed
+  ansible.builtin.stat:
+    path: /opt/horizon
+  register: horizon_installed
 
 - name: Enterprise_linux_OS_install - Temporary directory creation
   ansible.builtin.tempfile:
     state: directory
     prefix: horizon_
   register: horizon_temp_install_directory
+  when: not horizon_installed.stat.exists  # Only create if not installed
 
 - name: Enterprise_linux_OS_install - Download Horizon's rpm
   ansible.builtin.get_url:
     url: "{{ horizon_pkg_uri }}"
     dest: "{{ horizon_temp_install_directory['path'] }}"
-    username: "{{ sonatype_username }}"
-    password: '{{ sonatype_pwd }}'
+    username: "{{ horizon_repository_username }}"
+    password: '{{ horizon_repository_password }}'
+  when: not horizon_installed.stat.exists  # Only download if not installed
 
 - name: Enterprise_linux_OS_install - Install Horizon's rpm
   ansible.builtin.yum:
     name: "{{ [ horizon_temp_install_directory['path'], (horizon_pkg_uri | basename) ] | path_join }}"
     state: present
     disable_gpg_check: yes
-  become: yes
+  become: true
+  when: not horizon_installed.stat.exists  # Only install if not installed
+
+- name: Enterprise_linux_OS_install - Check if mongosh is already installed
+  ansible.builtin.stat:
+    path: /usr/bin/mongosh
+  register: mongosh_installed
+
+- name: Enterprise_linux_OS_install - Create temp directory for mongosh
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: horizon_mongosh_
+  register: horizon_mongosh_temp_directory
+  when: not mongosh_installed.stat.exists
 
 - name: Enterprise_linux_OS_install - Download mongodb-mongosh RPM
   ansible.builtin.get_url:
-    url: "{{ mongodb_org_repo_uri }}"
-    dest: "{{ [ horizon_temp_install_directory['path'], (mongodb_org_repo_uri | basename) ] | path_join }}"
+    url: "{{ horizon_mongodb_shell_package_uri }}"
+    dest: "{{ [ horizon_mongosh_temp_directory['path'], (horizon_mongodb_shell_package_uri | basename) ] | path_join }}"
+  when: not mongosh_installed.stat.exists
 
-- name: Enterprise_linux_OS_install - Install MongoDB RPMs
+- name: Enterprise_linux_OS_install - Install Mongosh RPMs
   ansible.builtin.yum:
-    name: "{{ [ horizon_temp_install_directory['path'], (mongodb_org_repo_uri | basename) ] | path_join }}"
+    name: "{{ [ horizon_mongosh_temp_directory['path'], (horizon_mongodb_shell_package_uri | basename) ] | path_join }}"
     state: present
     disable_gpg_check: yes
     skip_broken: yes
+  when: not mongosh_installed.stat.exists

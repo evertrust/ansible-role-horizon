@@ -1,7 +1,7 @@
 galaxy_info:
-  author: vdo
-  description: Deployment of Horizon in HA using RPMs
+  role_name: ansible_role_horizon
+  namespace: evertrust
+  author: evertrust
+  description: Deployment of Horizon in HA using RPMs v2 using Dynamic inventory
   company: EVERTRUST
-
-  min_ansible_version: 2.1
-
+  min_ansible_version: "2.1"

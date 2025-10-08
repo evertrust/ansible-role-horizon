@@ -1,4 +1,27 @@
 ---
+# Set per-host variables first
+- name: Main - Set horizon_hostname_node to current inventory hostname
+  ansible.builtin.set_fact:
+    horizon_hostname_node: "{{ inventory_hostname }}"
+
+- name: Main - Find node number in horizon_nodes list
+  ansible.builtin.set_fact:
+    node_number: "{{ idx }}"
+  loop: "{{ horizon_nodes }}"
+  loop_control:
+    index_var: idx
+  when: 
+    - item.hostname == inventory_hostname
+    - node_number is not defined
+
+- name: Main - Fail if node not found
+  ansible.builtin.fail:
+    msg: "Could not find {{ inventory_hostname }} in horizon_nodes list"
+  when: node_number is not defined
+
+- name: Main - Show configuration
+  ansible.builtin.debug:
+    msg: "Node configured as {{ horizon_hostname_node }} with index {{ node_number }}"
 
 - name: Installation for Enterprise Linux OS
   include_tasks: enterprise_linux_OS_install.yml
@@ -9,5 +32,9 @@
 - name: Edit config files
   include_tasks: config.yml
 
+- name: Configure firewall
+  include_tasks: firewall.yml
+  when: horizon_configure_firewall | default(true)
+  
 - name: Launch Horizon and its necessary services
   include_tasks: launching.yml

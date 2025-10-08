@@ -1,4 +1,31 @@
 ---
+- name: Config - Check if Horizon is installed
+  ansible.builtin.stat:
+    path: /opt/horizon
+  register: horizon_check
+
+- name: Config - Fail if Horizon not installed
+  ansible.builtin.fail:
+    msg: |
+      Horizon is not installed! The /opt/horizon directory does not exist.
+      This usually means the Horizon RPM installation failed.
+      Please check:
+      1. Repository credentials are correct (horizon_repository_username/password)
+      2. The RPM download succeeded
+      3. The RPM installation completed
+      Check the previous task output for errors.
+  when: not horizon_check.stat.exists
+
+- name: Config - Ensure Horizon directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /opt/horizon/etc
+    - /opt/horizon/var/log
+    - /opt/horizon/var/run
+
 - name: Config - Symlink
   file:
     src: /opt/horizon/etc/horizon-httpd.conf
@@ -6,19 +33,85 @@
     state: link
     force: yes
 
-- name: Config - Update licence
+- name: Config - Check if licence file source exists
+  ansible.builtin.stat:
+    path: "{{ horizon_licence_src_path }}"
+  register: licence_file_check
+  delegate_to: localhost
+  become: false
+  when: 
+    - horizon_licence_src_path is defined
+    - horizon_licence_src_path != ""
+    - horizon_licence_src_path != "path_to_your_licence_file"
+
+- name: Config - Fail if licence file not found
+  ansible.builtin.fail:
+    msg: |
+      Licence file not found at: {{ horizon_licence_src_path }}
+      Please provide a valid Horizon licence file by either:
+      1. Setting HORIZON_LICENCE_PATH environment variable
+      2. Setting horizon_licence_src_path in your configuration
+      3. Placing the licence file at the specified path
+  when: 
+    - horizon_licence_src_path is defined
+    - horizon_licence_src_path != ""
+    - horizon_licence_src_path != "path_to_your_licence_file"
+    - licence_file_check.stat is defined
+    - not (licence_file_check.stat.exists | default(false))
+
+- name: Config - Copy licence from source file
   ansible.builtin.copy:
     src: "{{ horizon_licence_src_path }}"
     dest: "{{ horizon_licence_dest_path }}"
+    mode: '0644'
+  when: 
+    - horizon_licence_src_path is defined
+    - horizon_licence_src_path != ""
+    - horizon_licence_src_path != "path_to_your_licence_file"
+    - licence_file_check.stat is defined
+    - licence_file_check.stat.exists | default(false)
+
+- name: Config - Fail if no licence path configured
+  ansible.builtin.fail:
+    msg: |
+      No licence file path configured!
+      Please provide a Horizon licence file by setting:
+      - HORIZON_LICENCE_PATH environment variable, or
+      - horizon_licence_src_path in mandatory_vars.yml
+  when: 
+    - horizon_licence_src_path is not defined or horizon_licence_src_path == "" or horizon_licence_src_path == "path_to_your_licence_file"
+
+- name: Config - Add horizon nodes to /etc/hosts (non-Docker)
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    block: |
+      {% for node in horizon_nodes %}
+      {{ node.ip }} {{ node.hostname }}
+      {% endfor %}
+      {{ horizon_mongodb_ip }} {{ horizon_mongodb_hostname }}
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - Horizon Cluster"
+    create: no
+    unsafe_writes: yes
+  when: ansible_virtualization_type != "docker"
+
+- name: Config - Add hosts for Docker environment
+  ansible.builtin.shell: |
+    {% for node in horizon_nodes %}
+    grep -q "{{ node.hostname }}" /etc/hosts || echo "{{ node.ip }} {{ node.hostname }}" >> /etc/hosts
+    {% endfor %}
+    grep -q "{{ horizon_mongodb_hostname }}" /etc/hosts || echo "{{ horizon_mongodb_ip }} {{ horizon_mongodb_hostname }}" >> /etc/hosts
+  args:
+    executable: /bin/bash
+  when: ansible_virtualization_type == "docker"
+  changed_when: false
 
 - name: Config - File creation /etc/default/horizon
   ansible.builtin.template:
-    src: "{{ path_to_template_default_horizon }}"
-    dest: "{{ path_to_default_horizon }}"
-
+    src: "{{ horizon_template_default_horizon }}"
+    dest: "{{ horizon_path_to_default_horizon }}"
 
 - name: Config - Update hosts allowed
   ansible.builtin.template:
-    src: "{{ path_to_template_hosts_allowed }}"
-    dest: "{{ path_to_hosts_allowed }}"
+    src: "{{ horizon_template_hosts_allowed }}"
+    dest: "{{ horizon_path_to_hosts_allowed }}"
 

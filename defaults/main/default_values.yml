@@ -1,38 +1,43 @@
 ---
-# defaults file for Horizon
+# Horizon default version
+horizon_version: 2.7.9-1
 
-horizon_version: 2.5.7-1
-
+# Licence file path
 horizon_licence_dest_path: /opt/horizon/etc/horizon.lic
-nginx_certs_directory_path: /etc/nginx/ssl
+
+# SSL/TLS certificate configuration
+horizon_cert_directory_path: /etc/nginx/ssl
 horizon_cert_key_size: 4096
 horizon_cert_key_type: RSA
-horizon_cert_C: FR
-horizon_cert_O: org
-horizon_cert_OU: ou
-horizon_cert_CN: cn
-horizon_hashing_algo: "sha256"
-path_to_template_default_horizon: etc_default_horizon.j2
-path_to_template_etc_hosts: etc_hosts.j2
-path_to_template_hosts_allowed: hosts_allowed.j2
-path_to_default_horizon: /etc/default/horizon
-path_to_etc_hosts: /etc/hosts
-path_to_hosts_allowed: /opt/horizon/etc/conf.d/horizon-extra.conf
+horizon_cert_country: FR
+horizon_cert_organization: org
+horizon_cert_organizational_unit: ou
+horizon_cert_common_name: cn
+horizon_cert_hashing_algo: "sha256"
 
+# Template names (just filename, Ansible finds in templates/)
+horizon_template_default_horizon: etc_default_horizon.j2
+horizon_template_hosts_allowed: hosts_allowed.j2
+
+# Paths to configuration files inside the VM
+horizon_path_to_default_horizon: /etc/default/horizon
+horizon_path_to_hosts_allowed: /opt/horizon/etc/conf.d/horizon-extra.conf
+#horizon_path_to_etc_hosts: /etc/hosts
+
+# Certificate generation and custom certs
 horizon_generate_default_cert: true
 horizon_csr: "" #path to the web server certificate csr
 horizon_pem: "" #path to the web server certificate pem
 horizon_key: "" #path to the key
 horizon_chain_pem: "" #path to the certificate's trust chain
 
-web_server: nginx
+# Web server
+horizon_web_server: nginx
 
+# System dependencies
 horizon_dependencies_list:
   - wget
   - epel-release
-  - "{{ web_server }}"
+  - "{{ horizon_web_server }}"
   - postfix
   - firewalld
-
-
-
