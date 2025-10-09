@@ -34,11 +34,11 @@ Before deployment, you must provide a valid Horizon licence file. Create the req
 ```bash
 # For Molecule testing
 mkdir -p molecule/default/files
-cp /path/to/your/horizon.lic molecule/default/files/horizon2.lic
+cp /path/to/your/horizon.lic molecule/default/files/horizon.lic
 
 # For VM deployment
 mkdir -p tests/files
-cp /path/to/your/horizon.lic tests/files/horizon2.lic
+cp /path/to/your/horizon.lic tests/files/horizon.lic
 ```
 
 Note: The files/ directories are not included in the repository and must be created before running the role.

@@ -16,7 +16,7 @@ horizon_repository_username: "CHANGE_THIS_repo_user"
 horizon_repository_password: "CHANGE_THIS_repo_password"
 
 # Licence file source path
-horizon_licence_src_path: "{{ playbook_dir }}/files/horizon2.lic"
+horizon_licence_src_path: "{{ playbook_dir }}/files/horizon.lic"
 
 # Cluster nodes configuration - change these to match your environment
 # Set the hostname and IP address for each Horizon node in your cluster
