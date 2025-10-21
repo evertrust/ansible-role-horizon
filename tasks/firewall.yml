@@ -1,0 +1,46 @@
+---
+- name: Firewall - Check if firewalld is installed
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Firewall - Install firewalld if not present
+  ansible.builtin.yum:
+    name: firewalld
+    state: present
+  when: "'firewalld' not in ansible_facts.packages"
+
+- name: Firewall - Ensure firewalld is running
+  ansible.builtin.systemd:
+    name: firewalld
+    state: started
+    enabled: yes
+
+- name: Firewall - Ensure SSH is allowed
+  ansible.posix.firewalld:
+    service: ssh
+    permanent: yes
+    state: enabled
+    immediate: yes
+
+- name: Firewall - Open HTTPS port (443)
+  ansible.posix.firewalld:
+    port: 443/tcp
+    permanent: yes
+    state: enabled
+    immediate: yes
+
+- name: Firewall - Open PEKKO Management HTTP port
+  ansible.posix.firewalld:
+    port: "{{ horizon_pekko_discovery_port }}/tcp"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  when: horizon_nodes | length > 1  # Only for HA clusters
+
+- name: Firewall - Open PEKKO Artery port for cluster communication
+  ansible.posix.firewalld:
+    port: "{{ horizon_pekko_artery_port }}/tcp"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  when: horizon_nodes | length > 1  # Only for HA clusters

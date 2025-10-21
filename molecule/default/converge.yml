@@ -1,0 +1,9 @@
+# Purpose: bring the instance to the desired state by running the role under test.
+# Molecule calls this playbook with `molecule converge`.
+---
+- name: Converge  
+  hosts: horizon_nodes
+  become: true
+  gather_facts: true
+  roles:
+    - role: "{{ playbook_dir }}/../.."

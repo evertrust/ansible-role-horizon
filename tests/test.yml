@@ -1,5 +1,15 @@
 ---
-- hosts: localhost
-  remote_user: root
-  roles:
-    - Horizon
+- name: Deploy Horizon in HA
+  hosts: horizon_cluster
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../defaults/main/default_values.yml
+    - ../defaults/main/mandatory_vars.yml
+    - ../vars/main.yml
+  tasks:
+    - name: Execute Horizon role tasks
+      ansible.builtin.import_tasks: ../tasks/main.yml
+  
+  handlers:
+    - ansible.builtin.import_tasks: ../handlers/main.yml

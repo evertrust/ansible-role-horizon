@@ -1,0 +1,121 @@
+---
+driver:
+  name: docker
+
+platforms:
+  # Horizon application nodes
+  - name: horizon-node1
+    image: geerlingguy/docker-rockylinux9-ansible:latest
+    command: ""
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+    networks:
+      - name: horizon-network
+    published_ports:
+      - "9001:9000"
+    groups:
+      - horizon_nodes
+
+  - name: horizon-node2
+    image: geerlingguy/docker-rockylinux9-ansible:latest
+    command: ""
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+    networks:
+      - name: horizon-network
+    published_ports:
+      - "9002:9000"
+    groups:
+      - horizon_nodes
+
+  # MongoDB database server
+  - name: mongodb-database
+    image: mongo:8.0
+    command: mongod --bind_ip_all
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: evertrust123
+    networks:
+      - name: horizon-network
+    published_ports:
+      - "27017:27017"
+    groups:
+      - mongodb
+
+provisioner:
+  name: ansible
+  connection_options:
+    ansible_connection: docker
+  config_options:
+    defaults:
+      host_key_checking: false
+      callbacks_enabled: profile_tasks, timer, yaml
+      stdout_callback: yaml
+  inventory:
+    host_vars:
+      horizon-node1:
+        ansible_connection: docker
+      horizon-node2:
+        ansible_connection: docker
+      mongodb-database:
+        ansible_connection: docker
+    group_vars:
+      all:
+        # Horizon secret keys
+        horizon_play_http_secret_key: "CHANGE_THIS_horizon_play_http_secret_key"
+        horizon_default_ssv_key: "CHANGE_THIS_horizon_default_ssv_key"
+        horizon_event_seal_secret: "CHANGE_THIS_horizon_event_seal_secret"
+
+        # Horizon package installation
+        horizon_version: 2.7.9-1
+        horizon_pkg_uri: "https://repo.evertrust.io/repository/horizon-rpm/horizon-{{ horizon_version }}.noarch.rpm"
+        horizon_repository_username: "CHANGE_THIS_repo_user"
+        horizon_repository_password: "CHANGE_THIS_repo_password"
+
+        # Licence configuration
+        horizon_licence_src_path: "{{ playbook_dir }}/files/horizon2.lic"
+
+        # MongoDB configuration
+        horizon_mongodb_uri: "mongodb://admin:evertrust123@mongodb-database:27017/horizon?authSource=admin" # Adapt as needed
+        horizon_mongodb_hostname: mongodb-database
+        horizon_mongodb_ip: mongodb-database
+
+        # Cluster nodes configuration
+        horizon_nodes:
+          - hostname: horizon-node1
+            ip: horizon-node1
+          - hostname: horizon-node2
+            ip: horizon-node2
+
+        # Pekko/Akka cluster communication ports
+        horizon_pekko_discovery_port: 7626
+        horizon_pekko_artery_port: 17335
+
+        # Load balancer configuration
+        horizon_use_load_balancer: false
+        horizon_load_balancer_hostname: load_balancer
+        horizon_load_balancer_ip: load_balancer
+
+verifier:
+  name: ansible
+
+scenario:
+  name: default
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - verify
+    - cleanup
+    - destroy

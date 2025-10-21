@@ -1,0 +1,16 @@
+---
+- name: Prepare horizon nodes
+  hosts: horizon_nodes
+  gather_facts: false
+  tasks:
+    - name: Wait for systemd to be ready
+      ansible.builtin.wait_for_connection:
+        timeout: 30
+
+- name: Prepare MongoDB
+  hosts: mongodb
+  gather_facts: false
+  tasks:
+    - name: Wait for MongoDB to start
+      ansible.builtin.pause:
+        seconds: 10
