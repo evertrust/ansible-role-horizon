@@ -79,7 +79,7 @@ provisioner:
         horizon_repository_password: "CHANGE_THIS_repo_password"
 
         # Licence configuration
-        horizon_licence_src_path: "{{ playbook_dir }}/files/horizon2.lic"
+        horizon_licence_src_path: "{{ playbook_dir }}/files/horizon.lic"
 
         # MongoDB configuration
         horizon_mongodb_uri: "mongodb://admin:evertrust123@mongodb-database:27017/horizon?authSource=admin" # Adapt as needed

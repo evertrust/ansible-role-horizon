@@ -57,3 +57,92 @@
         #  - "'horizon-node5:7626' in PEKKO_endpoints.stdout"
         fail_msg: "Not all nodes are configured in PEKKO_DISCOVERY_ENDPOINTS"
         success_msg: "All nodes are properly configured in PEKKO discovery"
+
+    - name: Check Horizon service status
+      ansible.builtin.systemd:
+        name: horizon
+      register: horizon_service
+      failed_when: false
+
+    - name: Assert Horizon service is running
+      ansible.builtin.assert:
+        that:
+          - horizon_service.status.ActiveState == "active"
+        fail_msg: "Horizon service is not running (State: {{ horizon_service.status.ActiveState }}, SubState: {{ horizon_service.status.SubState }})"
+        success_msg: "Horizon service is running"
+
+    - name: Check Nginx service status
+      ansible.builtin.systemd:
+        name: nginx
+      register: nginx_service
+      failed_when: false
+
+    - name: Assert Nginx service is running
+      ansible.builtin.assert:
+        that:
+          - nginx_service.status.ActiveState == "active"
+        fail_msg: "Nginx service is not running (State: {{ nginx_service.status.ActiveState }}, SubState: {{ nginx_service.status.SubState }})"
+        success_msg: "Nginx service is running"
+
+    - name: Check Postfix service status
+      ansible.builtin.systemd:
+        name: postfix
+      register: postfix_service
+      failed_when: false
+
+    - name: Assert Postfix service is running
+      ansible.builtin.assert:
+        that:
+          - postfix_service.status.ActiveState == "active"
+        fail_msg: "Postfix service is not running (State: {{ postfix_service.status.ActiveState }}, SubState: {{ postfix_service.status.SubState }})"
+        success_msg: "Postfix service is running"
+
+    - name: Check Nginx configuration
+      ansible.builtin.command: nginx -t
+      register: nginx_config
+      changed_when: false
+      failed_when: false
+
+    - name: Assert Nginx configuration is valid
+      ansible.builtin.assert:
+        that:
+          - nginx_config.rc == 0
+        fail_msg: "Nginx configuration is invalid"
+        success_msg: "Nginx configuration is valid"
+
+    - name: Check Horizon service is enabled
+      ansible.builtin.systemd:
+        name: horizon
+      register: horizon_enabled
+      failed_when: false
+
+    - name: Assert Horizon service is enabled
+      ansible.builtin.assert:
+        that:
+          - horizon_enabled.status.UnitFileState == "enabled"
+        fail_msg: "Horizon service is not enabled"
+        success_msg: "Horizon service is enabled"
+
+- name: Verify MongoDB
+  hosts: horizon_nodes
+  gather_facts: false
+  run_once: true
+  tasks:
+    - name: Wait for MongoDB to be ready
+      ansible.builtin.wait_for:
+        host: mongodb-database
+        port: 27017
+        timeout: 30
+
+    - name: Test MongoDB connection with mongosh
+      ansible.builtin.command: mongosh --host mongodb-database --port 27017 --eval "db.adminCommand('ping')"
+      register: mongodb_ping
+      changed_when: false
+      failed_when: false
+
+    - name: Assert MongoDB is responding
+      ansible.builtin.assert:
+        that:
+          - mongodb_ping.rc == 0
+        fail_msg: "MongoDB is not responding to ping command"
+        success_msg: "MongoDB is running and responding"
