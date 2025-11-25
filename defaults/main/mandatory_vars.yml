@@ -11,7 +11,7 @@ horizon_event_seal_secret: "CHANGE_THIS_horizon_event_seal_secret"
 
 # Horizon Package installation
 horizon_version: 2.7.9-1
-horizon_pkg_uri: "https://repo.evertrust.io/repository/horizon-rpm/horizon-{{ horizon_version }}.noarch.rpm"
+horizon_pkg_uri: "https://repo.evertrust.io/repository/horizon-rpm/horizon-{{ horizon_version }}.noarch.rpm" # please check on the repo for the version, as it could be x86_64 or aarch64
 horizon_repository_username: "CHANGE_THIS_repo_user"
 horizon_repository_password: "CHANGE_THIS_repo_password"
 

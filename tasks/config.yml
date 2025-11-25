@@ -107,11 +107,10 @@
 
 - name: Config - File creation /etc/default/horizon
   ansible.builtin.template:
-    src: "{{ horizon_template_default_horizon }}"
+    src: "../templates/{{ horizon_template_default_horizon }}"
     dest: "{{ horizon_path_to_default_horizon }}"
 
 - name: Config - Update hosts allowed
   ansible.builtin.template:
-    src: "{{ horizon_template_hosts_allowed }}"
+    src: "../templates/{{ horizon_template_hosts_allowed }}"
     dest: "{{ horizon_path_to_hosts_allowed }}"
-
