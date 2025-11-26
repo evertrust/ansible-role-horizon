@@ -70,15 +70,15 @@ provisioner:
     group_vars:
       all:
         # Horizon secret keys
-        horizon_play_http_secret_key: "514vl8YnJQIwNwnx6OzxGAqhNRg4Gd3j"
-        horizon_default_ssv_key: "qeld3LkAlhffIN4s68RFoUuY5hnLYtP7"
-        horizon_event_seal_secret: "CPgjnKeR7UfQWgwczjdZYZn0fCAjuqC6"
+        horizon_play_http_secret_key: "CHANGE_THIS_play_http_secret_key"
+        horizon_default_ssv_key: "CHANGE_THIS_default_ssv_key"
+        horizon_event_seal_secret: "CHANGE_THIS_event_seal_secret"
 
         # Horizon package installation
         horizon_version: 2.7.9-1
         horizon_pkg_uri: "https://repo.evertrust.io/repository/horizon-rpm/horizon-{{ horizon_version }}.noarch.rpm"
-        horizon_repository_username: "axu"
-        horizon_repository_password: "wmf.bmt9CPX.eqb7rdp"
+        horizon_repository_username: "CHANGE_THIS_repository_username"
+        horizon_repository_password: "CHANGE_THIS_repository_password"
 
         # Licence configuration
         horizon_licence_src_path: "{{ playbook_dir }}/files/horizon.lic"
