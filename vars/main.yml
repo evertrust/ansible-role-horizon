@@ -1,4 +1,5 @@
 ---
+
 horizon_custom_certs:
   key:
     src: "{{ horizon_key }}"

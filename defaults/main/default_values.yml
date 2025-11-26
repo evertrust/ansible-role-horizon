@@ -1,4 +1,5 @@
 ---
+
 # Horizon default version
 horizon_version: 2.7.9-1
 
@@ -22,7 +23,6 @@ horizon_template_hosts_allowed: hosts_allowed.j2
 # Paths to configuration files inside the VM
 horizon_path_to_default_horizon: /etc/default/horizon
 horizon_path_to_hosts_allowed: /opt/horizon/etc/conf.d/horizon-extra.conf
-#horizon_path_to_etc_hosts: /etc/hosts
 
 # Certificate generation and custom certs
 horizon_generate_default_cert: true

@@ -1,5 +1,5 @@
 ---
-# Set per-host variables first
+
 - name: Main - Set horizon_hostname_node to current inventory hostname
   ansible.builtin.set_fact:
     horizon_hostname_node: "{{ inventory_hostname }}"

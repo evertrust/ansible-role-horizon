@@ -1,4 +1,5 @@
 ---
+
 - name: Uninstall Horizon
   hosts: horizon_cluster
   become: true

@@ -9,14 +9,11 @@ import sys
 import os
 
 def load_vars_file():
-    """Load and parse the mandatory_vars.yml file."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # Try multiple possible locations
     possible_paths = [
-        os.path.join(script_dir, '..', '..', 'defaults', 'main', 'mandatory_vars.yml'),  # From tests/
-        os.path.join(script_dir, '..', 'defaults', 'main', 'mandatory_vars.yml'),  # From inventory/
-        os.path.join(script_dir, 'defaults', 'main', 'mandatory_vars.yml'),  # From root
+        os.path.join(script_dir, '..', '..', 'defaults', 'main', 'mandatory_vars.yml'),
+        os.path.join(script_dir, '..', 'defaults', 'main', 'mandatory_vars.yml'),
+        os.path.join(script_dir, 'defaults', 'main', 'mandatory_vars.yml'),
     ]
     
     vars_file = None
@@ -54,7 +51,6 @@ def load_vars_file():
         return None
 
 def build_inventory(vars_data):
-    """Build the Ansible inventory structure from vars data."""
     inventory = {
         'all': {
             'children': ['horizon_cluster']
@@ -75,7 +71,6 @@ def build_inventory(vars_data):
     if vars_data is None:
         return inventory
     
-    # Build hosts from horizon_nodes
     horizon_nodes = vars_data.get('horizon_nodes', [])
     
     if not horizon_nodes:
@@ -110,14 +105,8 @@ def build_inventory(vars_data):
     return inventory
 
 def main():
-    """Main entry point."""
-    # Load configuration
-    vars_data = load_vars_file()
-    
-    # Build inventory
+    vars_data = load_vars_file()    
     inventory = build_inventory(vars_data)
-    
-    # Output JSON
     print(json.dumps(inventory, indent=2))
 
 if __name__ == '__main__':

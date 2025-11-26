@@ -1,4 +1,5 @@
 ---
+
 - name: Firewall - Check if firewalld is installed
   ansible.builtin.package_facts:
     manager: auto
@@ -29,18 +30,18 @@
     state: enabled
     immediate: yes
 
-- name: Firewall - Open PEKKO Management HTTP port
+- name: Firewall - Open Akka Management HTTP port (7626)
   ansible.posix.firewalld:
-    port: "{{ horizon_pekko_discovery_port }}/tcp"
+    port: "{{ horizon_akka_discovery_port }}/tcp"
     permanent: yes
     state: enabled
     immediate: yes
-  when: horizon_nodes | length > 1  # Only for HA clusters
+  when: horizon_nodes | length > 1
 
-- name: Firewall - Open PEKKO Artery port for cluster communication
+- name: Firewall - Open Akka Artery port for cluster communication (17355)
   ansible.posix.firewalld:
-    port: "{{ horizon_pekko_artery_port }}/tcp"
+    port: "{{ horizon_akka_artery_port }}/tcp"
     permanent: yes
     state: enabled
     immediate: yes
-  when: horizon_nodes | length > 1  # Only for HA clusters
+  when: horizon_nodes | length > 1

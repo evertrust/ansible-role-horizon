@@ -52,10 +52,12 @@ Note: The files/ directories are not included in the repository and must be crea
 | **22 (SSH)** | Remote administration | Always |
 | **80** | HTTP web access | Always |
 | **443** | HTTPS web access | Always |
-| **7626** | Pekko Management (cluster discovery) | Only for HA (2+ nodes) |
-| **17335** | Pekko Artery (cluster communication) | Only for HA (2+ nodes) |
+| **7626** | Akka Management (cluster discovery) | Only for HA (2+ nodes) |
+| **17335** | Akka Artery (cluster communication) | Only for HA (2+ nodes) |
 
 **Note:** Port 9000 (Horizon application) is bound to `127.0.0.1` only and is NOT exposed externally. Nginx acts as a reverse proxy on ports 80/443.
+
+**Note on Akka/Pekko:** Stream internally uses Pekko (the successor to Akka), but configuration variables maintain the `AKKA_*` naming convention for backwards compatibility with older Horizon versions. The functionality and port numbers remain the same.
 
 **For MongoDB:** If managing the MongoDB VM separately, ensure port 27017 is open only to Horizon node IPs for security.
 
@@ -80,8 +82,8 @@ The following table regroups the data that you have to provide the Ansible role 
 | `horizon_mongodb_hostname` | Hostname of your MongoDB instance |
 | `horizon_mongodb_ip` | IP address of your MongoDB instance |
 | `horizon_nodes` | List of Horizon nodes with hostname and IP (see below) |
-| `horizon_pekko_discovery_port` | Port for Pekko cluster discovery (default: 7626) |
-| `horizon_pekko_artery_port` | Port for Pekko cluster communication (default: 17335) |
+| `horizon_akka_discovery_port` | Port for Akka cluster discovery (default: 7626) |
+| `horizon_akka_artery_port` | Port for Akka cluster communication (default: 17335) |
 
 **Horizon Nodes Configuration:**
 
@@ -172,7 +174,7 @@ All certificate files are automatically set with proper permissions (root:nginx,
 The provisioning of your Horizon licence and the different configuration files needed for Horizon to run properly, based on their respective templates:
 - Deployment of license file to `/opt/horizon/etc/horizon.lic`
 - Updates to `/etc/hosts` with cluster node entries
-- Generation of `/etc/default/horizon` with JVM, Play, MongoDB, and Pekko cluster settings
+- Generation of `/etc/default/horizon` with JVM, Play, MongoDB, and Akka cluster settings
 - Configuration of hosts.allowed whitelist
 - Nginx symlink creation
 
@@ -181,7 +183,7 @@ The provisioning of your Horizon licence and the different configuration files n
 Automatic configuration of firewalld to open necessary ports:
 - SSH (22) to prevent lockout
 - HTTP (80) and HTTPS (443) for web access
-- Pekko cluster ports (7626, 17335) for HA deployments only
+- Akka cluster ports (7626, 17335) for HA deployments only
 
 ### 5. Service Management
 
@@ -190,12 +192,12 @@ The start of adequate services:
 - Horizon service
 - Nginx service (with configuration test)
 
-### Pekko Cluster Split-Brain Resolver
+### Akka Cluster Split-Brain Resolver
 
-**IMPORTANT:** For High Availability deployments (2+ nodes), the role automatically configures Pekko's split-brain resolver using a MongoDB-based lease-majority strategy:
+**IMPORTANT:** For High Availability deployments (2+ nodes), the role automatically configures Akka's split-brain resolver using a MongoDB-based lease-majority strategy:
 
 ```hocon
-pekko.cluster.split-brain-resolver {
+akka.cluster.split-brain-resolver {
     active-strategy = "lease-majority"
     lease-majority {
       lease-implementation = "lease.mongo"
@@ -222,13 +224,13 @@ This prevents "Host not allowed" errors when accessing Horizon through different
 
 For a single Horizon instance (no High Availability), configure only one node in `horizon_nodes`. The role will:
 - Only open HTTP, HTTPS, and SSH ports
-- Not open Pekko cluster ports
+- Not open Akka cluster ports
 - Configure Horizon without cluster formation
 
 ### High Availability Deployment
 
 For a clustered Horizon deployment (2-5 nodes), configure multiple nodes in `horizon_nodes`. The role will:
-- Open all required ports including Pekko cluster ports
+- Open all required ports including Akka cluster ports
 - Configure nodes to automatically discover each other
 - Enable split-brain resolver for cluster stability
 - Provide redundancy and load distribution
@@ -252,19 +254,19 @@ Here is a basic way of using this role:
 # 1. Configure your variables in defaults/main/mandatory_vars.yml
 
 # 2. Syntax check
-ansible-playbook tests/test.yml -i tests/inventory.py --syntax-check
+ansible-playbook tests/deploy.yml -i tests/inventory.py --syntax-check
 
 # 3. Test connectivity
 ansible all -i tests/inventory.py -m ping
 
 # 4. Dry run (check mode)
-ansible-playbook tests/test.yml -i tests/inventory.py --check
+ansible-playbook tests/deploy.yml -i tests/inventory.py --check
 
 # 5. Deploy
-ansible-playbook tests/test.yml -i tests/inventory.py
+ansible-playbook tests/deploy.yml -i tests/inventory.py
 
 # 6. With verbose output
-ansible-playbook tests/test.yml -i tests/inventory.py -vvv
+ansible-playbook tests/deploy.yml -i tests/inventory.py -vv
 ```
 
 ## Check the Installation
@@ -286,8 +288,8 @@ sudo systemctl status horizon
 # Verify firewall configuration
 sudo firewall-cmd --list-all
 
-# For HA: Check Pekko cluster configuration
-grep "PEKKO_DISCOVERY_ENDPOINTS" /etc/default/horizon
+# For HA: Check Akka cluster configuration
+grep "AKKA_DISCOVERY_ENDPOINTS" /etc/default/horizon
 
 # Check Horizon logs
 sudo journalctl -u horizon -f

@@ -1,4 +1,5 @@
 ---
+
 - name: Prepare horizon nodes
   hosts: horizon_nodes
   gather_facts: false

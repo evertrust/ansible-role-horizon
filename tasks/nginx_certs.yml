@@ -1,6 +1,5 @@
 ---
 
-##If no certificate has been set up in variables
 - name: Nginx_certs - Ensure SSL directory exists
   ansible.builtin.file:
     path: "{{ horizon_cert_directory_path }}"
@@ -50,7 +49,6 @@
   notify: "Horizon - Handlers - Restart nginx services"
   when: horizon_generate_default_cert == true
 
-##If a certificate, its key and its trustchain have been setup
 - name: Nginx_certs - Create horizon.key with provided content
   ansible.builtin.copy:
     content: "{{  horizon_current_file['value']['src'] }}"
@@ -61,8 +59,7 @@
   notify: "Horizon - Handlers - Restart nginx services"
   when: horizon_generate_default_cert == false
 
-##Permissions changes : not incorporated to the cert generation to handle the cases where the certs
-##already exist or have been created using builtin.command
+# Permissions changes : not incorporated to the cert generation to handle the cases where the certs already exist or have been created using builtin.command
 - name: Nginx_certs - Set permissions and ownership of these files
   ansible.builtin.file:
     path: "{{  horizon_current_file['value']['dest'] }}"

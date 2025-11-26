@@ -1,4 +1,5 @@
 ---
+
 - name: Verify
   hosts: horizon_nodes
   gather_facts: true
@@ -40,23 +41,23 @@
         fail_msg: "Horizon environment file does not exist"
         success_msg: "Horizon environment file exists"
 
-    - name: Verify PEKKO_DISCOVERY_ENDPOINTS contains all nodes
+    - name: Verify AKKA_DISCOVERY_ENDPOINTS contains all nodes
       ansible.builtin.shell: |
-        grep "PEKKO_DISCOVERY_ENDPOINTS" /etc/default/horizon
-      register: PEKKO_endpoints
+        grep "AKKA_DISCOVERY_ENDPOINTS" /etc/default/horizon
+      register: AKKA_endpoints
       changed_when: false
 
 # Make sure to adjust the number of hostnames based on the nodes configured
-    - name: Assert all nodes are in PEKKO discovery
+    - name: Assert all nodes are in AKKA discovery
       ansible.builtin.assert:
         that:
-          - "'horizon-node1:7626' in PEKKO_endpoints.stdout"
-          - "'horizon-node2:7626' in PEKKO_endpoints.stdout"
-        #  - "'horizon-node3:7626' in PEKKO_endpoints.stdout"
-        #  - "'horizon-node4:7626' in PEKKO_endpoints.stdout"
-        #  - "'horizon-node5:7626' in PEKKO_endpoints.stdout"
-        fail_msg: "Not all nodes are configured in PEKKO_DISCOVERY_ENDPOINTS"
-        success_msg: "All nodes are properly configured in PEKKO discovery"
+          - "'horizon-node1:7626' in AKKA_endpoints.stdout"
+          - "'horizon-node2:7626' in AKKA_endpoints.stdout"
+        #  - "'horizon-node3:7626' in AKKA_endpoints.stdout"
+        #  - "'horizon-node4:7626' in AKKA_endpoints.stdout"
+        #  - "'horizon-node5:7626' in AKKA_endpoints.stdout"
+        fail_msg: "Not all nodes are configured in AKKA_DISCOVERY_ENDPOINTS"
+        success_msg: "All nodes are properly configured in AKKA discovery"
 
     - name: Check Horizon service status
       ansible.builtin.systemd:

@@ -1,4 +1,5 @@
 ---
+
 - name: Deploy Horizon in HA
   hosts: horizon_cluster
   become: true

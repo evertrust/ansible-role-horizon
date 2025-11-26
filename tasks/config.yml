@@ -1,4 +1,5 @@
 ---
+
 - name: Config - Check if Horizon is installed
   ansible.builtin.stat:
     path: /opt/horizon

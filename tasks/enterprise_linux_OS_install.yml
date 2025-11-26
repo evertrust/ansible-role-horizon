@@ -9,10 +9,10 @@
 - name: Enterprise_linux_OS_install - Check SELinux status
   command: getenforce
   register: selinux_status
-  changed_when: false  # This command does not change system state
+  changed_when: false
 
 - name: Enterprise_linux_OS_install - Set SELinux  if it is enforcing
-  command: setsebool -P httpd_can_network_connect 1 # Allow httpd to make network connections, which is needed for accessing Horizon's UI 
+  command: setsebool -P httpd_can_network_connect 1
   when: selinux_status['stdout'] == "Enforcing"
 
 - name: Enterprise_linux_OS_install - Check if Horizon RPM is already installed
@@ -25,7 +25,7 @@
     state: directory
     prefix: horizon_
   register: horizon_temp_install_directory
-  when: not horizon_installed.stat.exists  # Only create if not installed
+  when: not horizon_installed.stat.exists
 
 - name: Enterprise_linux_OS_install - Download Horizon's rpm
   ansible.builtin.get_url:
@@ -33,7 +33,7 @@
     dest: "{{ horizon_temp_install_directory['path'] }}"
     username: "{{ horizon_repository_username }}"
     password: '{{ horizon_repository_password }}'
-  when: not horizon_installed.stat.exists  # Only download if not installed
+  when: not horizon_installed.stat.exists
 
 - name: Enterprise_linux_OS_install - Install Horizon's rpm
   ansible.builtin.yum:
@@ -41,7 +41,7 @@
     state: present
     disable_gpg_check: yes
   become: true
-  when: not horizon_installed.stat.exists  # Only install if not installed
+  when: not horizon_installed.stat.exists
 
 - name: Enterprise_linux_OS_install - Check if mongosh is already installed
   ansible.builtin.stat:
