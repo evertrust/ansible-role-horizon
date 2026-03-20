@@ -1,13 +1,20 @@
 ---
 
+- name: Launching - Wait for MongoDB to be reachable
+  ansible.builtin.wait_for:
+    host: "{{ horizon_mongodb_hostname }}"
+    port: 27017
+    timeout: 30
+    msg: "MongoDB at {{ horizon_mongodb_hostname }}:27017 is not reachable"
+
 - name: Launching - Start postfix service
   ansible.builtin.systemd:
     name: postfix
     state: started
-    enabled: yes
+    enabled: true
 
 - name: Launching - Start Horizon service
   ansible.builtin.systemd:
     name: horizon
     state: started
-    enabled: yes
+    enabled: true

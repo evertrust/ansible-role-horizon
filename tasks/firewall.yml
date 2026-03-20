@@ -14,34 +14,34 @@
   ansible.builtin.systemd:
     name: firewalld
     state: started
-    enabled: yes
+    enabled: true
 
 - name: Firewall - Ensure SSH is allowed
   ansible.posix.firewalld:
     service: ssh
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
 
 - name: Firewall - Open HTTPS port (443)
   ansible.posix.firewalld:
     port: 443/tcp
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
 
 - name: Firewall - Open Akka Management HTTP port (7626)
   ansible.posix.firewalld:
     port: "{{ horizon_akka_discovery_port }}/tcp"
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
   when: horizon_nodes | length > 1
 
-- name: Firewall - Open Akka Artery port for cluster communication (17355)
+- name: Firewall - Open Akka Artery port for cluster communication (17335)
   ansible.posix.firewalld:
     port: "{{ horizon_akka_artery_port }}/tcp"
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
   when: horizon_nodes | length > 1

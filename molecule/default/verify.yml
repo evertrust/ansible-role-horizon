@@ -47,17 +47,31 @@
       register: AKKA_endpoints
       changed_when: false
 
-# Make sure to adjust the number of hostnames based on the nodes configured
-    - name: Assert all nodes are in AKKA discovery
+    - name: Assert all nodes are in AKKA discovery (HA mode)
       ansible.builtin.assert:
         that:
-          - "'horizon-node1:7626' in AKKA_endpoints.stdout"
-          - "'horizon-node2:7626' in AKKA_endpoints.stdout"
-        #  - "'horizon-node3:7626' in AKKA_endpoints.stdout"
-        #  - "'horizon-node4:7626' in AKKA_endpoints.stdout"
-        #  - "'horizon-node5:7626' in AKKA_endpoints.stdout"
-        fail_msg: "Not all nodes are configured in AKKA_DISCOVERY_ENDPOINTS"
-        success_msg: "All nodes are properly configured in AKKA discovery"
+          - "item.hostname ~ ':' ~ horizon_akka_discovery_port in AKKA_endpoints.stdout"
+        fail_msg: "Node {{ item.hostname }}:{{ horizon_akka_discovery_port }} not found in AKKA_DISCOVERY_ENDPOINTS"
+        success_msg: "Node {{ item.hostname }} is in AKKA discovery"
+      loop: "{{ horizon_nodes }}"
+      when: horizon_nodes | length > 1
+
+    - name: Assert AKKA_DISCOVERY_ENDPOINTS is empty (standalone mode)
+      ansible.builtin.assert:
+        that:
+          - "'AKKA_DISCOVERY_ENDPOINTS=' in AKKA_endpoints.stdout"
+        fail_msg: "AKKA_DISCOVERY_ENDPOINTS should be empty in standalone mode"
+        success_msg: "Standalone mode: AKKA_DISCOVERY_ENDPOINTS is empty as expected"
+      when: horizon_nodes | length == 1
+
+    - name: Wait for Horizon service to be active
+      ansible.builtin.shell: systemctl is-active horizon
+      register: horizon_active
+      until: horizon_active.stdout == "active"
+      retries: 12
+      delay: 10
+      changed_when: false
+      failed_when: false
 
     - name: Check Horizon service status
       ansible.builtin.systemd:
@@ -69,6 +83,7 @@
       ansible.builtin.assert:
         that:
           - horizon_service.status.ActiveState == "active"
+          - horizon_service.status.SubState == "running"
         fail_msg: "Horizon service is not running (State: {{ horizon_service.status.ActiveState }}, SubState: {{ horizon_service.status.SubState }})"
         success_msg: "Horizon service is running"
 
@@ -124,6 +139,48 @@
         fail_msg: "Horizon service is not enabled"
         success_msg: "Horizon service is enabled"
 
+- name: Verify Tinkey (Horizon >= 2.8 only)
+  hosts: horizon_nodes
+  gather_facts: false
+  tasks:
+    - name: Check if Tinkey is installed
+      ansible.builtin.stat:
+        path: /opt/evertrust/tinkey/bin/tinkey
+      register: tinkey_bin
+      when: (horizon_version.split('-')[0]) is version('2.8', '>=')
+
+    - name: Assert Tinkey is installed
+      ansible.builtin.assert:
+        that:
+          - tinkey_bin.stat.exists
+        fail_msg: "Tinkey binary not found at /opt/evertrust/tinkey/bin/tinkey"
+        success_msg: "Tinkey is installed"
+      when: (horizon_version.split('-')[0]) is version('2.8', '>=')
+
+    - name: Check if keyset file exists
+      ansible.builtin.stat:
+        path: /opt/horizon/etc/horizon.keyset
+      register: horizon_keyset_file
+      when: (horizon_version.split('-')[0]) is version('2.8', '>=')
+
+    - name: Assert keyset file exists
+      ansible.builtin.assert:
+        that:
+          - horizon_keyset_file.stat.exists
+        fail_msg: "Horizon keyset file not found at /opt/horizon/etc/horizon.keyset"
+        success_msg: "Horizon keyset file exists"
+      when: (horizon_version.split('-')[0]) is version('2.8', '>=')
+
+    - name: Assert keyset file permissions
+      ansible.builtin.assert:
+        that:
+          - horizon_keyset_file.stat.pw_name == "horizon"
+          - horizon_keyset_file.stat.gr_name == "horizon"
+          - horizon_keyset_file.stat.mode == "0640"
+        fail_msg: "Horizon keyset file has incorrect permissions"
+        success_msg: "Horizon keyset file has correct permissions (horizon:horizon 0640)"
+      when: (horizon_version.split('-')[0]) is version('2.8', '>=')
+
 - name: Verify MongoDB
   hosts: horizon_nodes
   gather_facts: false
@@ -136,7 +193,8 @@
         timeout: 30
 
     - name: Test MongoDB connection with mongosh
-      ansible.builtin.command: mongosh --host mongodb-database --port 27017 --eval "db.adminCommand('ping')"
+      ansible.builtin.shell: |
+        mongosh "mongodb://admin:evertrust123@mongodb-database:27017/admin" --eval "db.adminCommand('ping')" --quiet
       register: mongodb_ping
       changed_when: false
       failed_when: false
@@ -145,5 +203,5 @@
       ansible.builtin.assert:
         that:
           - mongodb_ping.rc == 0
-        fail_msg: "MongoDB is not responding to ping command"
+        fail_msg: "MongoDB is not responding to ping command (rc={{ mongodb_ping.rc }}, stderr={{ mongodb_ping.stderr | default('') }})"
         success_msg: "MongoDB is running and responding"

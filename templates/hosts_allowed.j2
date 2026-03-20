@@ -2,9 +2,10 @@
 {% for node in horizon_nodes %}
 play.filters.hosts.allowed.{{ start_index + loop.index0 }}="{{ node.hostname }}"
 {% endfor %}
-{% if horizon_use_load_balancer | default(false) %}
-play.filters.hosts.allowed.{{ start_index + horizon_nodes | length }}="{{ horizon_load_balancer_hostname }}"
-
+{% if horizon_extra_allowed_hosts | default([]) | length > 0 %}
+{% for host in horizon_extra_allowed_hosts %}
+play.filters.hosts.allowed.{{ start_index + horizon_nodes | length + loop.index0 }}="{{ host }}"
+{% endfor %}
 {% endif %}
 
 # Akka cluster split-brain resolver configuration

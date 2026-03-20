@@ -2,3 +2,4 @@
 *.lic
 !horizon-test.lic
 .DS_Store
+*.env
