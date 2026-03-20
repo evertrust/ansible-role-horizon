@@ -9,19 +9,19 @@
       ansible.builtin.systemd:
         name: horizon
         state: stopped
-      ignore_errors: yes
+      ignore_errors: true
     
     - name: Stop nginx service
       ansible.builtin.systemd:
         name: nginx
         state: stopped
-      ignore_errors: yes
+      ignore_errors: true
     
     - name: Stop postfix service
       ansible.builtin.systemd:
         name: postfix
         state: stopped
-      ignore_errors: yes
+      ignore_errors: true
     
     - name: Remove Horizon RPM
       ansible.builtin.yum:
@@ -53,11 +53,11 @@
     - name: Remove firewall rules
       ansible.posix.firewalld:
         port: "{{ item }}"
-        permanent: yes
+        permanent: true
         state: disabled
-        immediate: yes
+        immediate: true
       loop:
         - 443/tcp
         - 7626/tcp
         - 17335/tcp
-      ignore_errors: yes
+      ignore_errors: true

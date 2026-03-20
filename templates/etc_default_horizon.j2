@@ -19,6 +19,10 @@ HORIZON_NOTIFICATION_SMTP_HOST=127.0.0.1
 HORIZON_HOSTNAME={{ horizon_hostname_node }}
 HORIZON_DEFAULT_SSV_KEY={{ horizon_default_ssv_key }}
 HORIZON_EVENT_SEAL_SECRET={{ horizon_event_seal_secret }}
+{% if (horizon_version.split('-')[0]) is version('2.8', '>=') %}
+HORIZON_TINK_MASTER_KEY_URI={{ horizon_tink_master_key_uri }}
+HORIZON_TINK_CREDENTIALS_PATH={{ horizon_tink_credentials_path }}
+{% endif %}
 
 # Akka nodes for HA
 # All HA nodes in hostname:port format, comma separated

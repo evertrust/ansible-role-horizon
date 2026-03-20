@@ -1,9 +1,9 @@
-Role Name
-=========
+Evertrust Horizon
+=================
 
 Requirements
 ------------
-To be able to use this role you have to previously provision VMs running on **CentOS/RHEL** and meeting the requirements from the official EVERTRUST documentation: https://docs.evertrust.fr/horizon/install-guide/2.7/iaas/prerequisites. 
+To be able to use this role you have to previously provision VMs running on **CentOS/RHEL** and meeting the requirements from the official Evertrust documentation: https://docs.evertrust.fr/horizon/install-guide/2.8/iaas/prerequisites.
 A root access to these VMs is mandatory, as per a normal RPM install of Horizon. You will have to configure your Ansible playbook to use these accounts while playing the role.
 
 **IMPORTANT:** A running instance of MongoDB is also necessary. MongoDB should be accessible from all Horizon nodes.
@@ -21,7 +21,7 @@ It is necessary to:
    ```bash
    # Generate SSH key if needed
    ssh-keygen -t rsa -b 4096
-   
+
    # Copy to each target node
    ssh-copy-id root@horizon-node1-ip
    ssh-copy-id root@horizon-node2-ip
@@ -50,12 +50,13 @@ Note: The files/ directories are not included in the repository and must be crea
 | Port/Service | Purpose | When Opened |
 |--------------|---------|-------------|
 | **22 (SSH)** | Remote administration | Always |
-| **80** | HTTP web access | Always |
 | **443** | HTTPS web access | Always |
-| **7626** | Pekko Management (cluster discovery) | Only for HA (2+ nodes) |
-| **17335** | Pekko Artery (cluster communication) | Only for HA (2+ nodes) |
+| **7626** | Akka Management (cluster discovery) | Only for HA (2+ nodes) |
+| **17335** | Akka Artery (cluster communication) | Only for HA (2+ nodes) |
 
-**Note:** Port 9000 (Horizon application) is bound to `127.0.0.1` only and is NOT exposed externally. Nginx acts as a reverse proxy on ports 80/443.
+**Note:** Port 9000 (Horizon application) is bound to `127.0.0.1` only and is NOT exposed externally. Nginx acts as a reverse proxy on port 443 (HTTPS only).
+
+**Note on Akka/Pekko:** Horizon internally uses Pekko (the successor to Akka), but configuration variables maintain the `AKKA_*` naming convention for backwards compatibility with older Horizon versions. The functionality and port numbers remain the same.
 
 **For MongoDB:** If managing the MongoDB VM separately, ensure port 27017 is open only to Horizon node IPs for security.
 
@@ -67,21 +68,35 @@ The following table regroups the data that you have to provide the Ansible role 
 
 | Key | Value Type |
 |-----|------------|
-| `horizon_play_http_secret_key` | String (32+ characters), alphanumeric only |
-| `horizon_default_ssv_key` | String (32+ characters), alphanumeric only |
-| `horizon_event_seal_secret` | String (32+ characters), alphanumeric only |
-| `horizon_version` | Horizon version (e.g., `2.7.9-1`) |
-| `horizon_pkg_uri` | URL where you store the Horizon RPM |
-| `horizon_repository_username` | Username to authenticate to this URL |
-| `horizon_repository_password` | Password to authenticate to this URL |
+| `horizon_play_http_secret_key` | Random string, 128 characters, may include `@`, `!`, `#` |
+| `horizon_default_ssv_key` | Random string, 128 characters, may include `@`, `!`, `#` |
+| `horizon_event_seal_secret` | Random string, 128 characters, may include `@`, `!`, `#` |
+| `horizon_version` | Horizon version (e.g., `2.8.1`) |
+| `horizon_pkg_uri` | URL where you store the Horizon RPM (check architecture: x86_64 or aarch64) |
+| `horizon_repository_username` | Username to authenticate to the Evertrust repository |
+| `horizon_repository_password` | Password to authenticate to the Evertrust repository |
+| `horizon_tinkey_version` | Tinkey version (required for Horizon >= 2.8, e.g., `1.12.0.1`) |
+| `horizon_tinkey_pkg_uri` | URL where you store the Tinkey RPM (check architecture: x86_64 or aarch64) |
 | `horizon_licence_src_path` | Path to your Horizon license on your control machine |
-| `horizon_mongodb_uri` | MongoDB connection string with authentication |
-| `horizon_mongodb_shell_package_uri` | URL where you store the Mongosh RPM |
+| `horizon_mongodb_username` | MongoDB user pre-created on your MongoDB instance |
+| `horizon_mongodb_password` | Password of the MongoDB user |
+| `horizon_mongodb_uri` | MongoDB connection string (auto-built from username/password/hostname) |
+| `horizon_mongodb_shell_package_uri` | URL where you store the Mongosh RPM (check architecture: x86_64 or aarch64) |
 | `horizon_mongodb_hostname` | Hostname of your MongoDB instance |
 | `horizon_mongodb_ip` | IP address of your MongoDB instance |
 | `horizon_nodes` | List of Horizon nodes with hostname and IP (see below) |
-| `horizon_pekko_discovery_port` | Port for Pekko cluster discovery (default: 7626) |
-| `horizon_pekko_artery_port` | Port for Pekko cluster communication (default: 17335) |
+| `horizon_akka_discovery_port` | Port for Akka cluster discovery (default: 7626) |
+| `horizon_akka_artery_port` | Port for Akka cluster communication (default: 17335) |
+| `horizon_configure_firewall` | Set to `false` to skip firewall configuration (default: `true`) |
+| `horizon_extra_allowed_hosts` | Additional hosts allowed in Play filter, e.g. load balancer hostname (default: `[]`) |
+
+### Tinkey / KMS Variables (Horizon >= 2.8)
+
+| Key | Value Type |
+|-----|------------|
+| `horizon_tink_master_key_uri` | KMS key URI (e.g. `gcp-kms://...` or `aws-kms://...`). Leave empty for soft mode (plaintext keyset). |
+| `horizon_tink_credentials_src_path` | Path to the KMS credentials file on the Ansible controller. Leave empty for soft mode or HSM. |
+| `horizon_tink_credentials_path` | Destination path of the KMS credentials file on the VM (default: `/opt/horizon/etc/tink-credentials.json`) |
 
 **Horizon Nodes Configuration:**
 
@@ -107,7 +122,7 @@ horizon_nodes:
 - For **x86_64** (most common): Use the x86_64 RPM URL
 - For **aarch64** (ARM): Use the aarch64 RPM URL
 
-The default configuration uses aarch64. Change this if your systems are x86_64.
+The default configuration uses the architecture detected at runtime (`ansible_facts['architecture']`). The Horizon and Tinkey RPMs default to `noarch` and work on both architectures.
 
 ## Overview
 
@@ -125,6 +140,7 @@ This role is composed of the following steps played in order:
 The download and install of the necessary packages to run Horizon, including:
 - System dependencies (wget, nginx, postfix, firewalld, epel-release)
 - Horizon RPM package
+- Tinkey RPM package (required for Horizon >= 2.8, used for AES256 keyset encryption)
 - MongoDB shell (mongosh)
 - SELinux configuration if enforcing mode is detected
 
@@ -167,35 +183,43 @@ All certificate files are automatically set with proper permissions (root:nginx,
    sudo systemctl reload nginx
 ```
 
-### 3. Configuration Provisioning
+### 3. Tinkey Keyset Generation (Horizon >= 2.8 only)
+
+Generation and distribution of the AES256-GCM encryption keyset used by Horizon:
+- On HA deployments: generated on node 1 and distributed to all other nodes
+- On standalone deployments: generated directly on the single node
+- Keyset stored at `/opt/horizon/etc/horizon.keyset` (permissions: `horizon:horizon 0640`)
+
+### 4. Configuration Provisioning
 
 The provisioning of your Horizon licence and the different configuration files needed for Horizon to run properly, based on their respective templates:
 - Deployment of license file to `/opt/horizon/etc/horizon.lic`
 - Updates to `/etc/hosts` with cluster node entries
-- Generation of `/etc/default/horizon` with JVM, Play, MongoDB, and Pekko cluster settings
+- Generation of `/etc/default/horizon` with JVM, Play, MongoDB, and Akka cluster settings
 - Configuration of hosts.allowed whitelist
 - Nginx symlink creation
 
-### 4. Firewall Configuration
+### 5. Firewall Configuration
 
 Automatic configuration of firewalld to open necessary ports:
 - SSH (22) to prevent lockout
-- HTTP (80) and HTTPS (443) for web access
-- Pekko cluster ports (7626, 17335) for HA deployments only
+- HTTPS (443) for web access
+- Akka cluster ports (7626, 17335) for HA deployments only
+- Can be disabled by setting `horizon_configure_firewall: false`
 
-### 5. Service Management
+### 6. Service Management
 
 The start of adequate services:
 - Postfix service
 - Horizon service
 - Nginx service (with configuration test)
 
-### Pekko Cluster Split-Brain Resolver
+### Akka Cluster Split-Brain Resolver
 
-**IMPORTANT:** For High Availability deployments (2+ nodes), the role automatically configures Pekko's split-brain resolver using a MongoDB-based lease-majority strategy:
+**IMPORTANT:** For High Availability deployments (2+ nodes), the role automatically configures Akka's split-brain resolver using a MongoDB-based lease-majority strategy:
 
 ```hocon
-pekko.cluster.split-brain-resolver {
+akka.cluster.split-brain-resolver {
     active-strategy = "lease-majority"
     lease-majority {
       lease-implementation = "lease.mongo"
@@ -207,12 +231,12 @@ This configuration ensures proper cluster behavior during network partitions and
 
 ### Hosts Allowed Configuration
 
-Additionally, a touchy and key element of the Horizon configuration is the Play variable "hosts allowed" in the horizon-extra.conf file. It configures the whitelist allowed to access Horizon. 
+Additionally, a touchy and key element of the Horizon configuration is the Play variable "hosts allowed" in the horizon-extra.conf file. It configures the whitelist allowed to access Horizon.
 
 The role automatically configures this whitelist to include:
 - localhost
 - All Horizon cluster node hostnames
-- Load balancer hostname (if `horizon_use_load_balancer` is set to true)
+- Any additional hosts defined in `horizon_extra_allowed_hosts` (e.g. load balancer hostname, `127.0.0.1` for local testing)
 
 This prevents "Host not allowed" errors when accessing Horizon through different hostnames.
 
@@ -222,13 +246,13 @@ This prevents "Host not allowed" errors when accessing Horizon through different
 
 For a single Horizon instance (no High Availability), configure only one node in `horizon_nodes`. The role will:
 - Only open HTTP, HTTPS, and SSH ports
-- Not open Pekko cluster ports
+- Not open Akka cluster ports
 - Configure Horizon without cluster formation
 
 ### High Availability Deployment
 
 For a clustered Horizon deployment (2-5 nodes), configure multiple nodes in `horizon_nodes`. The role will:
-- Open all required ports including Pekko cluster ports
+- Open all required ports including Akka cluster ports
 - Configure nodes to automatically discover each other
 - Enable split-brain resolver for cluster stability
 - Provide redundancy and load distribution
@@ -238,8 +262,8 @@ For a clustered Horizon deployment (2-5 nodes), configure multiple nodes in `hor
 Here is a basic way of using this role:
 
 ```yaml
-- name: Deploy Horizon in HA
-  hosts: horizon_cluster
+- name: Deploy Horizon
+  hosts: horizon_nodes
   become: true
   gather_facts: true
   roles:
@@ -252,24 +276,24 @@ Here is a basic way of using this role:
 # 1. Configure your variables in defaults/main/mandatory_vars.yml
 
 # 2. Syntax check
-ansible-playbook tests/test.yml -i tests/inventory.py --syntax-check
+ansible-playbook tests/deploy.yml -i tests/inventory.py --syntax-check
 
 # 3. Test connectivity
 ansible all -i tests/inventory.py -m ping
 
 # 4. Dry run (check mode)
-ansible-playbook tests/test.yml -i tests/inventory.py --check
+ansible-playbook tests/deploy.yml -i tests/inventory.py --check
 
 # 5. Deploy
-ansible-playbook tests/test.yml -i tests/inventory.py
+ansible-playbook tests/deploy.yml -i tests/inventory.py
 
 # 6. With verbose output
-ansible-playbook tests/test.yml -i tests/inventory.py -vvv
+ansible-playbook tests/deploy.yml -i tests/inventory.py -vv
 ```
 
 ## Check the Installation
 
-If your Ansible role didn't fail during the play, your Horizon HA should be deployed.
+If your Ansible role didn't fail during the play, your Horizon instance should be deployed.
 
 To test it, run:
 
@@ -286,8 +310,8 @@ sudo systemctl status horizon
 # Verify firewall configuration
 sudo firewall-cmd --list-all
 
-# For HA: Check Pekko cluster configuration
-grep "PEKKO_DISCOVERY_ENDPOINTS" /etc/default/horizon
+# For HA: Check Akka cluster configuration
+grep "AKKA_DISCOVERY_ENDPOINTS" /etc/default/horizon
 
 # Check Horizon logs
 sudo journalctl -u horizon -f
@@ -300,6 +324,7 @@ Before running the playbook, verify:
 - [ ] All VMs are provisioned and accessible via SSH
 - [ ] SSH keys are copied to all target nodes
 - [ ] MongoDB is running and accessible
+- [ ] MongoDB user is created with `dbOwner` role on the `horizon` database
 - [ ] `mandatory_vars.yml` is configured with real values (no placeholders)
 - [ ] MongoDB shell package URI matches your architecture (x86_64 vs aarch64)
 - [ ] Horizon license file path is correct
@@ -308,4 +333,4 @@ Before running the playbook, verify:
 
 ## Author Information
 
-If you have difficulties to use this role or modifications recommendations, please contact EVERTRUST.
+If you have difficulties to use this role or modifications recommendations, please contact Evertrust.

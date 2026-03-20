@@ -7,7 +7,8 @@
     state: directory
     mode: '0755'
 
-- fail:
+- name: Nginx_certs - Fail if custom certs not provided
+  ansible.builtin.fail:
     msg: "You should set all of the horizon_csr etc... "
   when: horizon_generate_default_cert == false and (horizon_csr == "" or horizon_pem == "" or horizon_key == "")
 
@@ -44,8 +45,8 @@
   ansible.builtin.copy:
     src: "{{ [horizon_cert_directory_path, 'horizon.pem'] | path_join }}"
     dest: "{{ [horizon_cert_directory_path, 'horizon-chain.pem'] | path_join }}"
-    force: yes
-    remote_src: yes
+    force: true
+    remote_src: true
   register: chain_pem_created
   notify: "Horizon - Handlers - Restart nginx services"
   when: horizon_generate_default_cert == true

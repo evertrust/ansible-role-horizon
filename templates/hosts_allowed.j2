@@ -1,18 +1,19 @@
 {% set start_index = 4 %}
 {% for node in horizon_nodes %}
 play.filters.hosts.allowed.{{ start_index + loop.index0 }}="{{ node.hostname }}"
-play.filters.hosts.allowed.{{ start_index + loop.index0 + horizon_nodes | length }}="{{ node.hostname }}.orb.local"
 {% endfor %}
-{% if horizon_use_load_balancer | default(false) %}
-play.filters.hosts.allowed.{{ start_index + (horizon_nodes | length * 2) }}="{{ horizon_load_balancer_hostname }}"
-#play.filters.hosts.allowed.{{ start_index + (horizon_nodes | length) }}="{{ horizon_load_balancer_hostname }}"
-
+{% if horizon_extra_allowed_hosts | default([]) | length > 0 %}
+{% for host in horizon_extra_allowed_hosts %}
+play.filters.hosts.allowed.{{ start_index + horizon_nodes | length + loop.index0 }}="{{ host }}"
+{% endfor %}
 {% endif %}
 
-# Pekko cluster split-brain resolver configuration
-pekko.cluster.split-brain-resolver {
+# Akka cluster split-brain resolver configuration
+{% if horizon_nodes | length > 1 %}
+akka.cluster.split-brain-resolver {
     active-strategy = "lease-majority"
     lease-majority {
       lease-implementation = "lease.mongo"
     }
 }
+{% endif %}

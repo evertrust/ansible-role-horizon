@@ -7,13 +7,14 @@
     update_cache: true
 
 - name: Enterprise_linux_OS_install - Check SELinux status
-  command: getenforce
+  ansible.builtin.command: getenforce
   register: selinux_status
-  changed_when: false  # This command does not change system state
+  changed_when: false
 
 - name: Enterprise_linux_OS_install - Set SELinux  if it is enforcing
-  command: setsebool -P httpd_can_network_connect 1 # Allow httpd to make network connections, which is needed for accessing Horizon's UI 
+  ansible.builtin.command: setsebool -P httpd_can_network_connect 1
   when: selinux_status['stdout'] == "Enforcing"
+  changed_when: false
 
 - name: Enterprise_linux_OS_install - Check if Horizon RPM is already installed
   ansible.builtin.stat:
@@ -25,7 +26,7 @@
     state: directory
     prefix: horizon_
   register: horizon_temp_install_directory
-  when: not horizon_installed.stat.exists  # Only create if not installed
+  when: not horizon_installed.stat.exists
 
 - name: Enterprise_linux_OS_install - Download Horizon's rpm
   ansible.builtin.get_url:
@@ -33,38 +34,76 @@
     dest: "{{ horizon_temp_install_directory['path'] }}"
     username: "{{ horizon_repository_username }}"
     password: '{{ horizon_repository_password }}'
-  when: not horizon_installed.stat.exists  # Only download if not installed
+  when: not horizon_installed.stat.exists
 
 - name: Enterprise_linux_OS_install - Install Horizon's rpm
   ansible.builtin.yum:
     name: "{{ [ horizon_temp_install_directory['path'], (horizon_pkg_uri | basename) ] | path_join }}"
     state: present
-    disable_gpg_check: yes
+    disable_gpg_check: true
   become: true
-  when: not horizon_installed.stat.exists  # Only install if not installed
+  when: not horizon_installed.stat.exists
 
-- name: Enterprise_linux_OS_install - Check if mongosh is already installed
+- name: Enterprise_linux_OS_install - Check if Tinkey is already installed
   ansible.builtin.stat:
-    path: /usr/bin/mongosh
-  register: mongosh_installed
+    path: /opt/evertrust/tinkey/bin/tinkey
+  register: tinkey_installed
+  when: (horizon_version.split('-')[0]) is version('2.8', '>=')
 
-- name: Enterprise_linux_OS_install - Create temp directory for mongosh
+- name: Enterprise_linux_OS_install - Create temp directory for Tinkey
   ansible.builtin.tempfile:
     state: directory
-    prefix: horizon_mongosh_
-  register: horizon_mongosh_temp_directory
-  when: not mongosh_installed.stat.exists
+    prefix: horizon_tinkey_
+  register: horizon_tinkey_temp_directory
+  when:
+    - (horizon_version.split('-')[0]) is version('2.8', '>=')
+    - not tinkey_installed.stat.exists
+
+- name: Enterprise_linux_OS_install - Download Tinkey RPM
+  ansible.builtin.get_url:
+    url: "{{ horizon_tinkey_pkg_uri }}"
+    dest: "{{ [ horizon_tinkey_temp_directory['path'], (horizon_tinkey_pkg_uri | basename) ] | path_join }}"
+    username: "{{ horizon_repository_username }}"
+    password: '{{ horizon_repository_password }}'
+  when:
+    - (horizon_version.split('-')[0]) is version('2.8', '>=')
+    - not tinkey_installed.stat.exists
+
+- name: Enterprise_linux_OS_install - Install Tinkey RPM
+  ansible.builtin.yum:
+    name: "{{ [ horizon_tinkey_temp_directory['path'], (horizon_tinkey_pkg_uri | basename) ] | path_join }}"
+    state: present
+    disable_gpg_check: true
+    skip_broken: true
+  when:
+    - (horizon_version.split('-')[0]) is version('2.8', '>=')
+    - not tinkey_installed.stat.exists
+
+- name: Enterprise_linux_OS_install - Check if mongosh is already installed
+  ansible.builtin.shell: rpm -qa | grep -qi mongosh
+  register: mongosh_installed
+  changed_when: false
+  failed_when: false
+  args:
+    executable: /bin/bash
+
+- name: Enterprise_linux_OS_install - Ensure mongosh install directory exists
+  ansible.builtin.file:
+    path: /tmp/horizon-mongosh-install
+    state: directory
+    mode: '0755'
+  when: mongosh_installed.rc != 0
 
 - name: Enterprise_linux_OS_install - Download mongodb-mongosh RPM
   ansible.builtin.get_url:
     url: "{{ horizon_mongodb_shell_package_uri }}"
-    dest: "{{ [ horizon_mongosh_temp_directory['path'], (horizon_mongodb_shell_package_uri | basename) ] | path_join }}"
-  when: not mongosh_installed.stat.exists
+    dest: "/tmp/horizon-mongosh-install/{{ horizon_mongodb_shell_package_uri | basename }}"
+  when: mongosh_installed.rc != 0
 
 - name: Enterprise_linux_OS_install - Install Mongosh RPMs
   ansible.builtin.yum:
-    name: "{{ [ horizon_mongosh_temp_directory['path'], (horizon_mongodb_shell_package_uri | basename) ] | path_join }}"
+    name: "/tmp/horizon-mongosh-install/{{ horizon_mongodb_shell_package_uri | basename }}"
     state: present
-    disable_gpg_check: yes
-    skip_broken: yes
-  when: not mongosh_installed.stat.exists
+    disable_gpg_check: true
+    skip_broken: true
+  when: mongosh_installed.rc != 0

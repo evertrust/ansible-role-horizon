@@ -1,5 +1,22 @@
 ---
-# Set per-host variables first
+
+- name: Main - Generate secret keys once on first node (if not set via env vars)
+  ansible.builtin.set_fact:
+    horizon_play_http_secret_key: "{{ lookup('password', '/dev/null chars=ascii_letters,digits,@,!,# length=128') }}"
+    horizon_default_ssv_key: "{{ lookup('password', '/dev/null chars=ascii_letters,digits,@,!,# length=128') }}"
+    horizon_event_seal_secret: "{{ lookup('password', '/dev/null chars=ascii_letters,digits,@,!,# length=128') }}"
+  run_once: true
+  when: lookup('env', 'HORIZON_PLAY_HTTP_SECRET_KEY') == ''
+
+- name: Main - Distribute generated secret keys to all nodes
+  ansible.builtin.set_fact:
+    horizon_play_http_secret_key: "{{ hostvars[horizon_nodes[0].hostname]['horizon_play_http_secret_key'] }}"
+    horizon_default_ssv_key: "{{ hostvars[horizon_nodes[0].hostname]['horizon_default_ssv_key'] }}"
+    horizon_event_seal_secret: "{{ hostvars[horizon_nodes[0].hostname]['horizon_event_seal_secret'] }}"
+  when:
+    - lookup('env', 'HORIZON_PLAY_HTTP_SECRET_KEY') == ''
+    - inventory_hostname != horizon_nodes[0].hostname
+
 - name: Main - Set horizon_hostname_node to current inventory hostname
   ansible.builtin.set_fact:
     horizon_hostname_node: "{{ inventory_hostname }}"
@@ -10,7 +27,7 @@
   loop: "{{ horizon_nodes }}"
   loop_control:
     index_var: idx
-  when: 
+  when:
     - item.hostname == inventory_hostname
     - node_number is not defined
 
@@ -24,17 +41,17 @@
     msg: "Node configured as {{ horizon_hostname_node }} with index {{ node_number }}"
 
 - name: Installation for Enterprise Linux OS
-  include_tasks: enterprise_linux_OS_install.yml
+  ansible.builtin.include_tasks: enterprise_linux_OS_install.yml
 
 - name: Generate and/or config the Nginx certs
-  include_tasks: nginx_certs.yml
+  ansible.builtin.include_tasks: nginx_certs.yml
 
 - name: Edit config files
-  include_tasks: config.yml
+  ansible.builtin.include_tasks: config.yml
 
 - name: Configure firewall
-  include_tasks: firewall.yml
+  ansible.builtin.include_tasks: firewall.yml
   when: horizon_configure_firewall | default(true)
-  
+
 - name: Launch Horizon and its necessary services
-  include_tasks: launching.yml
+  ansible.builtin.include_tasks: launching.yml
