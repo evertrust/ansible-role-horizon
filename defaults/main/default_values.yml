@@ -50,3 +50,4 @@ horizon_dependencies_list:
   - "{{ horizon_web_server }}"
   - postfix
   - firewalld
+  - python3-libsemanage

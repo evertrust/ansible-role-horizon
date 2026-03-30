@@ -12,9 +12,11 @@
   changed_when: false
 
 - name: Enterprise_linux_OS_install - Set SELinux  if it is enforcing
-  ansible.builtin.command: setsebool -P httpd_can_network_connect 1
+  ansible.posix.seboolean:
+    name: httpd_can_network_connect
+    state: true
+    persistent: true
   when: selinux_status['stdout'] == "Enforcing"
-  changed_when: false
 
 - name: Enterprise_linux_OS_install - Check if Horizon RPM is already installed
   ansible.builtin.stat:

@@ -1,6 +1,6 @@
 ---
 - name: Deploy Horizon in HA
-  hosts: horizon_cluster
+  hosts: horizon_nodes
   become: true
   gather_facts: true
   vars_files:

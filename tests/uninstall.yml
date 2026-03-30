@@ -1,6 +1,6 @@
 ---
 - name: Uninstall Horizon
-  hosts: horizon_cluster
+  hosts: horizon_nodes
   become: true
   gather_facts: true
   
@@ -27,6 +27,27 @@
       ansible.builtin.yum:
         name: horizon
         state: absent
+
+    - name: Reload systemd daemon
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Reset failed state of horizon service
+      ansible.builtin.command: systemctl reset-failed horizon
+      ignore_errors: true
+      changed_when: false
+
+    - name: Remove Tinkey RPM
+      ansible.builtin.yum:
+        name: tinkey
+        state: absent
+      ignore_errors: true
+
+    - name: Remove Mongosh RPM
+      ansible.builtin.yum:
+        name: mongodb-mongosh
+        state: absent
+      ignore_errors: true
     
     - name: Remove Horizon directories
       ansible.builtin.file:
@@ -34,7 +55,9 @@
         state: absent
       loop:
         - /opt/horizon
+        - /opt/evertrust
         - /etc/default/horizon
+        - /etc/default/horizon.rpmsave
         - /etc/nginx/conf.d/horizon.conf
         - /etc/nginx/ssl/horizon.key
         - /etc/nginx/ssl/horizon.pem
@@ -42,13 +65,10 @@
         - /etc/nginx/ssl/horizon-chain.pem
     
     - name: Remove Horizon entries from /etc/hosts
-      ansible.builtin.lineinfile:
+      ansible.builtin.blockinfile:
         path: /etc/hosts
-        regexp: "{{ item }}"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - Horizon Cluster"
         state: absent
-      loop:
-        - "horizon-node"
-        - "mongodb"
     
     - name: Remove firewall rules
       ansible.posix.firewalld:

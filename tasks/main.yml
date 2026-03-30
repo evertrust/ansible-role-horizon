@@ -1,21 +1,16 @@
 ---
 
-- name: Main - Generate secret keys once on first node (if not set via env vars)
-  ansible.builtin.set_fact:
-    horizon_play_http_secret_key: "{{ lookup('password', '/dev/null chars=ascii_letters,digits,@,!,# length=128') }}"
-    horizon_default_ssv_key: "{{ lookup('password', '/dev/null chars=ascii_letters,digits,@,!,# length=128') }}"
-    horizon_event_seal_secret: "{{ lookup('password', '/dev/null chars=ascii_letters,digits,@,!,# length=128') }}"
+- name: Main - Fail if mandatory secret keys are not set
+  ansible.builtin.fail:
+    msg: |
+      Mandatory variable '{{ item.name }}' is not set.
+      Please set the '{{ item.env }}' environment variable before running this role.
+  when: item.value == ''
+  loop:
+    - { name: 'horizon_play_http_secret_key', env: 'HORIZON_PLAY_HTTP_SECRET_KEY', value: "{{ horizon_play_http_secret_key }}" }
+    - { name: 'horizon_default_ssv_key', env: 'HORIZON_DEFAULT_SSV_KEY', value: "{{ horizon_default_ssv_key }}" }
+    - { name: 'horizon_event_seal_secret', env: 'HORIZON_EVENT_SEAL_SECRET', value: "{{ horizon_event_seal_secret }}" }
   run_once: true
-  when: lookup('env', 'HORIZON_PLAY_HTTP_SECRET_KEY') == ''
-
-- name: Main - Distribute generated secret keys to all nodes
-  ansible.builtin.set_fact:
-    horizon_play_http_secret_key: "{{ hostvars[horizon_nodes[0].hostname]['horizon_play_http_secret_key'] }}"
-    horizon_default_ssv_key: "{{ hostvars[horizon_nodes[0].hostname]['horizon_default_ssv_key'] }}"
-    horizon_event_seal_secret: "{{ hostvars[horizon_nodes[0].hostname]['horizon_event_seal_secret'] }}"
-  when:
-    - lookup('env', 'HORIZON_PLAY_HTTP_SECRET_KEY') == ''
-    - inventory_hostname != horizon_nodes[0].hostname
 
 - name: Main - Set horizon_hostname_node to current inventory hostname
   ansible.builtin.set_fact:

@@ -64,13 +64,25 @@ Note: The files/ directories are not included in the repository and must be crea
 
 The following table regroups the data that you have to provide the Ansible role with for the deployment and configuration to work properly.
 
-**IMPORTANT:** All these variables must be configured in `defaults/main/mandatory_vars.yml` with real values before deployment.
+**IMPORTANT:** All these variables must be configured before deployment. Secret keys **must** be provided — the role will fail if they are missing.
+
+The recommended approach is to export them as environment variables before running the playbook:
+
+```bash
+# Copy the example file and fill in your values
+cp horizon.env.example horizon.env
+
+# Export the variables
+export $(grep -v '^#' horizon.env | xargs)
+```
+
+> **Note:** `horizon.env` is git-ignored. Never commit real credentials.
 
 | Key | Value Type |
 |-----|------------|
-| `horizon_play_http_secret_key` | Random string, 128 characters, may include `@`, `!`, `#` |
-| `horizon_default_ssv_key` | Random string, 128 characters, may include `@`, `!`, `#` |
-| `horizon_event_seal_secret` | Random string, 128 characters, may include `@`, `!`, `#` |
+| `horizon_play_http_secret_key` | **Required.** Random string, 128 characters, may include `@`, `!`, `#`. Set via `HORIZON_PLAY_HTTP_SECRET_KEY` env var. |
+| `horizon_default_ssv_key` | **Required.** Random string, 128 characters, may include `@`, `!`, `#`. Set via `HORIZON_DEFAULT_SSV_KEY` env var. |
+| `horizon_event_seal_secret` | **Required.** Random string, 128 characters, may include `@`, `!`, `#`. Set via `HORIZON_EVENT_SEAL_SECRET` env var. |
 | `horizon_version` | Horizon version (e.g., `2.8.1`) |
 | `horizon_pkg_uri` | URL where you store the Horizon RPM (check architecture: x86_64 or aarch64) |
 | `horizon_repository_username` | Username to authenticate to the Evertrust repository |
@@ -326,10 +338,21 @@ Before running the playbook, verify:
 - [ ] MongoDB is running and accessible
 - [ ] MongoDB user is created with `dbOwner` role on the `horizon` database
 - [ ] `mandatory_vars.yml` is configured with real values (no placeholders)
+- [ ] Secret keys (`HORIZON_PLAY_HTTP_SECRET_KEY`, `HORIZON_DEFAULT_SSV_KEY`, `HORIZON_EVENT_SEAL_SECRET`) are exported as environment variables
 - [ ] MongoDB shell package URI matches your architecture (x86_64 vs aarch64)
 - [ ] Horizon license file path is correct
 - [ ] Ansible and ansible.posix collection are installed
 - [ ] For RHEL 9: System is registered with subscription manager
+
+## Uninstall
+
+To completely remove Horizon from all nodes:
+
+```bash
+ansible-playbook tests/uninstall.yml -i tests/inventory.py
+```
+
+This will stop all services (Horizon, Nginx, Postfix), remove the Horizon, Tinkey and Mongosh packages, clean up all configuration files and firewall rules.
 
 ## Author Information
 

@@ -163,7 +163,6 @@
     - (horizon_version.split('-')[0]) is version('2.8', '>=')
     - inventory_hostname == horizon_nodes[0].hostname
     - horizon_nodes | length > 1
-  run_once: true
 
 - name: Config - Distribute the file to other nodes
   ansible.builtin.copy:
@@ -204,15 +203,3 @@
     mode: '0640'
   when: (horizon_version.split('-')[0]) is version('2.8', '>=')
 
-- name: Config - Display generated credentials (save these if auto-generated)
-  ansible.builtin.debug:
-    msg:
-      - "========== HORIZON GENERATED CREDENTIALS =========="
-      - "These values were auto-generated. Save them and re-run with env vars set for idempotency."
-      - ""
-      - "HORIZON_PLAY_HTTP_SECRET_KEY : {{ horizon_play_http_secret_key }}"
-      - "HORIZON_DEFAULT_SSV_KEY      : {{ horizon_default_ssv_key }}"
-      - "HORIZON_EVENT_SEAL_SECRET    : {{ horizon_event_seal_secret }}"
-      - "==================================================="
-  run_once: true
-  when: lookup('env', 'HORIZON_PLAY_HTTP_SECRET_KEY') == ''
