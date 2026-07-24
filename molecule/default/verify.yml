@@ -139,6 +139,222 @@
         fail_msg: "Horizon service is not enabled"
         success_msg: "Horizon service is enabled"
 
+- name: Verify Horizon is functional (not just running)
+  hosts: horizon_nodes
+  gather_facts: false
+  tasks:
+    # /ready is served by the Pekko management endpoint and runs
+    # healthcheck.HorizonReadinessCheck inside the app: it only returns 200
+    # once the cluster is formed, MongoDB is reachable and the app is ready.
+    - name: Wait for Horizon readiness check to pass
+      ansible.builtin.command: >-
+        curl -sk -o /dev/null -w "%{http_code}" https://127.0.0.1/ready
+      register: horizon_ready
+      until: horizon_ready.stdout == "200"
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Assert Horizon reports ready
+      ansible.builtin.assert:
+        that:
+          - horizon_ready.stdout == "200"
+        fail_msg: "Horizon readiness check failed (HTTP {{ horizon_ready.stdout }}) - service is up but the application is not functional"
+        success_msg: "Horizon readiness check passes (HTTP 200): cluster formed, MongoDB connected"
+
+    # A real Play endpoint (not an nginx rewrite): an unauthenticated API call
+    # must come back from the application itself as a JSON 401, not a 5xx
+    - name: Call Horizon API without authentication
+      ansible.builtin.command: >-
+        curl -sk -w "\n%{http_code}" https://127.0.0.1/api/v1/security/principals/self
+      register: horizon_api
+      changed_when: false
+
+    # PrincipalApiV1Controller.self() returns 204 (no principal), 200
+    # (authenticated) or 401 (auth error) - anything else (404, 5xx, 502)
+    # means the Play application is not serving requests
+    - name: Assert API answers from the application
+      ansible.builtin.assert:
+        that:
+          - horizon_api.stdout_lines[-1] in ["200", "204", "401"]
+        fail_msg: "API did not answer as expected (got: {{ horizon_api.stdout_lines[-1] }}) - 403 usually means the licence is expired (check 'Licence expired' in the response), otherwise the Play application is not serving requests"
+        success_msg: "Play application serves API requests (HTTP {{ horizon_api.stdout_lines[-1] }} on unauthenticated call, as expected)"
+
+    - name: Call Horizon UI through nginx
+      ansible.builtin.command: >-
+        curl -sk -o /dev/null -w "%{http_code}" https://127.0.0.1/ui
+      register: horizon_ui
+      changed_when: false
+
+    - name: Assert UI is served
+      ansible.builtin.assert:
+        that:
+          - horizon_ui.stdout == "200"
+        fail_msg: "UI is not served (HTTP {{ horizon_ui.stdout }})"
+        success_msg: "UI is served (HTTP 200)"
+
+    - name: Call API through a tenant vhost (Host-based routing reaches the app)
+      ansible.builtin.command: >-
+        curl -sk -w "\n%{http_code}"
+        --resolve {{ item.hostname }}:443:127.0.0.1
+        https://{{ item.hostname }}/api/v1/security/principals/self
+      loop: "{{ horizon_tenants | default([]) }}"
+      register: tenant_api
+      changed_when: false
+
+    - name: Assert tenant vhosts reach an existing tenant
+      ansible.builtin.assert:
+        that:
+          - item.stdout_lines[-1] in ["200", "204", "401", "403"]
+        fail_msg: "Tenant vhost {{ item.item.hostname }} did not reach an existing tenant (got {{ item.stdout_lines[-1] }})"
+        success_msg: "Tenant vhost {{ item.item.hostname }} reaches an existing tenant (HTTP {{ item.stdout_lines[-1] }})"
+      loop: "{{ tenant_api.results | default([]) }}"
+      when: tenant_api.results is defined
+
+- name: Verify tenant API provisioning
+  hosts: horizon_nodes
+  gather_facts: false
+  tasks:
+    - name: Read the Horizon bootstrap administrator password
+      ansible.builtin.slurp:
+        src: /opt/horizon/var/run/adminPassword
+      register: molecule_horizon_bootstrap_password
+      no_log: true
+      run_once: true
+      when:
+        - horizon_tenants | default([]) | length > 0
+        - horizon_admin_password | default('') | length == 0
+
+    - name: List tenants through the authenticated root API
+      ansible.builtin.uri:
+        url: "https://{{ horizon_nodes[0].hostname }}/api/v1/security/tenants"
+        # The verifier is a standalone play and therefore does not load the
+        # role defaults automatically.
+        url_username: "{{ horizon_admin_username | default('administrator', true) }}"
+        url_password: >-
+          {{ horizon_admin_password if horizon_admin_password | default('') | length > 0
+             else molecule_horizon_bootstrap_password.content | b64decode | trim }}
+        force_basic_auth: true
+        validate_certs: false
+        return_content: true
+        status_code: 200
+      register: molecule_tenant_list
+      no_log: true
+      run_once: true
+      when: horizon_tenants | default([]) | length > 0
+
+    - name: Assert every declared tenant exists in Horizon
+      ansible.builtin.assert:
+        that:
+          - item.name in (molecule_tenant_list.json | map(attribute='name') | list)
+        fail_msg: "Tenant {{ item.name }} was not created by the Horizon role"
+      loop: "{{ horizon_tenants | default([]) }}"
+      run_once: true
+      when: horizon_tenants | default([]) | length > 0
+
+- name: Verify nginx vhosts and tenant routing
+  hosts: horizon_nodes
+  gather_facts: false
+  tasks:
+    - name: Read deployed nginx configuration
+      ansible.builtin.slurp:
+        src: /etc/nginx/conf.d/horizon.conf
+      register: nginx_conf_raw
+
+    - name: Decode nginx configuration
+      ansible.builtin.set_fact:
+        nginx_conf: "{{ nginx_conf_raw.content | b64decode }}"
+
+    - name: Assert default vhost exists
+      ansible.builtin.assert:
+        that:
+          - "'listen       443 ssl default_server' in nginx_conf"
+        fail_msg: "Default vhost not found in nginx configuration"
+        success_msg: "Default vhost is configured"
+
+    - name: Assert each tenant has a vhost with X-Tenant header
+      ansible.builtin.assert:
+        that:
+          - "'server_name  ' ~ item.hostname in nginx_conf"
+          - "'proxy_set_header   X-Tenant \"' ~ item.name ~ '\"' in nginx_conf"
+        fail_msg: "Tenant vhost for {{ item.name }} ({{ item.hostname }}) missing or without X-Tenant header"
+        success_msg: "Tenant vhost {{ item.name }} is configured with X-Tenant routing"
+      loop: "{{ horizon_tenants | default([]) }}"
+
+    # The strip applies in every mode (even with no tenant configured), as a
+    # multitenant licence makes Horizon honour any client-supplied X-Tenant
+    - name: Assert default vhost strips client-supplied X-Tenant
+      ansible.builtin.assert:
+        that:
+          - "'proxy_set_header   X-Tenant \"\"' in nginx_conf"
+        fail_msg: "Default vhost does not strip client-supplied X-Tenant header"
+        success_msg: "Default vhost strips client-supplied X-Tenant header"
+      when: not (horizon_tenant_header_passthrough | default(false))
+
+    - name: Read horizon-extra.conf
+      ansible.builtin.slurp:
+        src: /opt/horizon/etc/conf.d/horizon-extra.conf
+      register: extra_conf_raw
+
+    - name: Decode horizon-extra.conf
+      ansible.builtin.set_fact:
+        extra_conf: "{{ extra_conf_raw.content | b64decode }}"
+
+    - name: Assert tenant hostnames are in Play allowed hosts
+      ansible.builtin.assert:
+        that:
+          - "item.hostname in extra_conf"
+        fail_msg: "Tenant hostname {{ item.hostname }} missing from Play allowed hosts"
+        success_msg: "Tenant hostname {{ item.hostname }} is allowed"
+      loop: "{{ horizon_tenants | default([]) }}"
+
+    - name: Assert split-brain resolver uses pekko namespace (Horizon >= 2.8, HA only)
+      ansible.builtin.assert:
+        that:
+          - "'pekko.cluster.split-brain-resolver' in extra_conf"
+          - "'akka.cluster.split-brain-resolver' not in extra_conf"
+        fail_msg: "Split-brain resolver should use the pekko config namespace for Horizon >= 2.8"
+        success_msg: "Split-brain resolver uses the pekko namespace"
+      when:
+        - horizon_nodes | length > 1
+        - (horizon_version.split('-')[0]) is version('2.8', '>=')
+
+    - name: Check tenant vhost answers over HTTPS (Host-based routing)
+      ansible.builtin.command: >-
+        curl -sk -o /dev/null -w "%{http_code}"
+        --resolve {{ item.hostname }}:443:127.0.0.1
+        https://{{ item.hostname }}/
+      loop: "{{ horizon_tenants | default([]) }}"
+      register: tenant_curl
+      changed_when: false
+      failed_when: false
+
+    - name: Assert tenant vhosts respond (no 5xx from nginx routing)
+      ansible.builtin.assert:
+        that:
+          - item.stdout is defined
+          - item.stdout != "000"
+        fail_msg: "Tenant vhost {{ item.item.hostname }} did not answer over HTTPS"
+        success_msg: "Tenant vhost {{ item.item.hostname }} answers over HTTPS (HTTP {{ item.stdout }})"
+      loop: "{{ tenant_curl.results | default([]) }}"
+      when: tenant_curl.results is defined
+
+    - name: Check generated certificate covers tenant SANs
+      ansible.builtin.shell: |
+        openssl x509 -in /etc/nginx/ssl/horizon.pem -noout -ext subjectAltName
+      register: cert_sans
+      changed_when: false
+      failed_when: false
+
+    - name: Assert tenant hostnames are in certificate SANs (generated cert only)
+      ansible.builtin.assert:
+        that:
+          - "item.hostname in cert_sans.stdout"
+        fail_msg: "Tenant hostname {{ item.hostname }} missing from certificate SANs"
+        success_msg: "Certificate SAN covers {{ item.hostname }}"
+      loop: "{{ horizon_tenants | default([]) }}"
+      when: horizon_generate_default_cert | default(true)
+
 - name: Verify Tinkey (Horizon >= 2.8 only)
   hosts: horizon_nodes
   gather_facts: false
@@ -180,6 +396,28 @@
         fail_msg: "Horizon keyset file has incorrect permissions"
         success_msg: "Horizon keyset file has correct permissions (horizon:horizon 0640)"
       when: (horizon_version.split('-')[0]) is version('2.8', '>=')
+
+- name: Verify Horizon CLI (x86_64 only - no RPM published for other architectures)
+  hosts: horizon_nodes
+  gather_facts: true
+  tasks:
+    - name: Check if Horizon CLI is installed
+      ansible.builtin.stat:
+        path: /opt/horizon/bin/horizon-cli
+      register: horizon_cli_bin
+      when:
+        - horizon_cli_install | default(true)
+        - ansible_facts['architecture'] == 'x86_64'
+
+    - name: Assert Horizon CLI is installed
+      ansible.builtin.assert:
+        that:
+          - horizon_cli_bin.stat.exists
+        fail_msg: "horizon-cli binary not found at /opt/horizon/bin/horizon-cli"
+        success_msg: "Horizon CLI is installed"
+      when:
+        - horizon_cli_install | default(true)
+        - ansible_facts['architecture'] == 'x86_64'
 
 - name: Verify MongoDB
   hosts: horizon_nodes

@@ -6,9 +6,6 @@ horizon_custom_certs:
   pem:
     src: "{{ horizon_pem }}"
     dest: "{{ [ horizon_cert_directory_path, 'horizon.pem' ] | path_join }}"
-  csr:
-    src: "{{ horizon_csr }}"
-    dest: "{{ [ horizon_cert_directory_path, 'horizon.csr' ] | path_join }}"
   chain_pem:
     src: "{{ horizon_chain_pem }}"
     dest: "{{ [ horizon_cert_directory_path, 'horizon-chain.pem' ] | path_join }}"

@@ -24,7 +24,7 @@
       ignore_errors: true
     
     - name: Remove Horizon RPM
-      ansible.builtin.yum:
+      ansible.builtin.dnf:
         name: horizon
         state: absent
 
@@ -38,13 +38,19 @@
       changed_when: false
 
     - name: Remove Tinkey RPM
-      ansible.builtin.yum:
+      ansible.builtin.dnf:
         name: tinkey
         state: absent
       ignore_errors: true
 
+    - name: Remove Horizon CLI RPM
+      ansible.builtin.dnf:
+        name: horizon-cli
+        state: absent
+      ignore_errors: true
+
     - name: Remove Mongosh RPM
-      ansible.builtin.yum:
+      ansible.builtin.dnf:
         name: mongodb-mongosh
         state: absent
       ignore_errors: true
@@ -79,5 +85,5 @@
       loop:
         - 443/tcp
         - 7626/tcp
-        - 17335/tcp
+        - 17355/tcp
       ignore_errors: true

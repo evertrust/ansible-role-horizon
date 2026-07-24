@@ -1,16 +1,17 @@
+{# Indexes 0-3 are written by the packaged service-customization.sh (localhost, 127.0.0.1, _, HORIZON_HOSTNAME) #}
 {% set start_index = 4 %}
-{% for node in horizon_nodes %}
-play.filters.hosts.allowed.{{ start_index + loop.index0 }}="{{ node.hostname }}"
+{% set allowed_hosts = (horizon_nodes | map(attribute='hostname') | list)
+   + (horizon_extra_allowed_hosts | default([]))
+   + (horizon_tenants | default([]) | map(attribute='hostname') | list) %}
+{% for host in allowed_hosts %}
+play.filters.hosts.allowed.{{ start_index + loop.index0 }}="{{ host }}"
 {% endfor %}
-{% if horizon_extra_allowed_hosts | default([]) | length > 0 %}
-{% for host in horizon_extra_allowed_hosts %}
-play.filters.hosts.allowed.{{ start_index + horizon_nodes | length + loop.index0 }}="{{ host }}"
-{% endfor %}
-{% endif %}
 
-# Akka cluster split-brain resolver configuration
+# Cluster split-brain resolver configuration
+# Horizon >= 2.8 runs on Pekko: the config root is "pekko", not "akka"
 {% if horizon_nodes | length > 1 %}
-akka.cluster.split-brain-resolver {
+{% set cluster_namespace = 'pekko' if (horizon_version.split('-')[0]) is version('2.8', '>=') else 'akka' %}
+{{ cluster_namespace }}.cluster.split-brain-resolver {
     active-strategy = "lease-majority"
     lease-majority {
       lease-implementation = "lease.mongo"

@@ -9,8 +9,62 @@
 
 - name: Nginx_certs - Fail if custom certs not provided
   ansible.builtin.fail:
-    msg: "You should set all of the horizon_csr etc... "
-  when: horizon_generate_default_cert == false and (horizon_csr == "" or horizon_pem == "" or horizon_key == "")
+    msg: >-
+      Custom TLS requires horizon_key, horizon_pem and horizon_chain_pem as
+      PEM content. horizon_csr is optional and is not used by Nginx at runtime.
+  when: not horizon_generate_default_cert and (horizon_pem == "" or horizon_key == "" or horizon_chain_pem == "")
+
+- name: Nginx_certs - Build subjectAltName string for the self-signed certificate
+  ansible.builtin.set_fact:
+    horizon_cert_san_string: >-
+      {%- for host in horizon_cert_san_hosts -%}
+      {{ 'IP:' if host is match('^\\d+\\.\\d+\\.\\d+\\.\\d+$') else 'DNS:' }}{{ host }}{{ ',' if not loop.last }}
+      {%- endfor -%}
+  when: horizon_generate_default_cert
+
+- name: Nginx_certs - Read existing self-signed certificate SANs
+  ansible.builtin.command:
+    cmd: "openssl x509 -in {{ [horizon_cert_directory_path, 'horizon.pem'] | path_join }} -noout -ext subjectAltName"
+  register: horizon_existing_certificate_sans
+  changed_when: false
+  failed_when: false
+  when: horizon_generate_default_cert
+
+- name: Nginx_certs - Identify missing SANs on an existing certificate
+  ansible.builtin.set_fact:
+    horizon_missing_certificate_sans: >-
+      {{ horizon_cert_san_hosts | reject('in', horizon_existing_certificate_sans.stdout | default('')) | list }}
+  when:
+    - horizon_generate_default_cert
+    - horizon_existing_certificate_sans.rc | default(1) == 0
+
+- name: Nginx_certs - Require an explicit self-signed certificate renewal
+  ansible.builtin.assert:
+    that:
+      - horizon_regenerate_self_signed_certificate_on_san_change | bool
+    fail_msg: >-
+      The existing self-signed Horizon certificate does not cover:
+      {{ horizon_missing_certificate_sans | join(', ') }}. Replace it through
+      the PKI process, or explicitly set
+      horizon_regenerate_self_signed_certificate_on_san_change: true.
+  when:
+    - horizon_generate_default_cert
+    - horizon_missing_certificate_sans | default([]) | length > 0
+
+- name: Nginx_certs - Remove an explicitly renewed self-signed certificate
+  ansible.builtin.file:
+    path: "{{ [horizon_cert_directory_path, item] | path_join }}"
+    state: absent
+  loop:
+    - horizon.key
+    - horizon.csr
+    - horizon.pem
+    - horizon-chain.pem
+  when:
+    - horizon_generate_default_cert
+    - horizon_missing_certificate_sans | default([]) | length > 0
+    - horizon_regenerate_self_signed_certificate_on_san_change | bool
+  notify: "Horizon - Handlers - Restart nginx services"
 
 - name: Nginx_certs - Generate OpenSSL key - default
   ansible.builtin.command:
@@ -25,6 +79,7 @@
     cmd: >
       openssl req -new -key {{ [horizon_cert_directory_path, 'horizon.key'] | path_join }} -out {{ [horizon_cert_directory_path, 'horizon.csr'] | path_join }}
       -subj "/C={{ horizon_cert_country }}/O={{ horizon_cert_organization }}/OU={{ horizon_cert_organizational_unit }}/CN={{ horizon_cert_common_name }}"
+      -addext "subjectAltName={{ horizon_cert_san_string }}"
     creates: "{{ [horizon_cert_directory_path, 'horizon.csr'] | path_join }}"
   when: horizon_generate_default_cert == true
   notify: "Horizon - Handlers - Restart nginx services"
@@ -35,7 +90,7 @@
     cmd: >
       openssl x509 -req -days 365 -in {{ [horizon_cert_directory_path, 'horizon.csr'] | path_join }}
       -signkey {{ [horizon_cert_directory_path, 'horizon.key'] | path_join }} -out {{ [horizon_cert_directory_path, 'horizon.pem'] | path_join }}
-      -set_serial 01 -days 365 -{{ horizon_cert_hashing_algo }}
+      -set_serial 01 -days 365 -{{ horizon_cert_hashing_algo }} -copy_extensions copy
     creates: "{{ [horizon_cert_directory_path, 'horizon.pem'] | path_join }}"
   when: horizon_generate_default_cert == true
   notify: "Horizon - Handlers - Restart nginx services"
@@ -51,16 +106,47 @@
   notify: "Horizon - Handlers - Restart nginx services"
   when: horizon_generate_default_cert == true
 
+- name: Nginx_certs - Restrict generated certificate files
+  ansible.builtin.file:
+    path: "{{ [horizon_cert_directory_path, item] | path_join }}"
+    owner: root
+    group: nginx
+    mode: '0640'
+  loop:
+    - horizon.key
+    - horizon.csr
+    - horizon.pem
+    - horizon-chain.pem
+  when: horizon_generate_default_cert
+
 ##If a certificate, its key and its trustchain have been setup
 - name: Nginx_certs - Create horizon.key with provided content
   ansible.builtin.copy:
     content: "{{  horizon_current_file['value']['src'] }}"
     dest: "{{  horizon_current_file['value']['dest'] }}"
+    owner: root
+    group: nginx
+    mode: '0640'
   loop: "{{ horizon_custom_certs | dict2items }}"
   loop_control:
     loop_var: horizon_current_file
   notify: "Horizon - Handlers - Restart nginx services"
   when: horizon_generate_default_cert == false
+  no_log: true
+  diff: false
+
+- name: Nginx_certs - Preserve an optional provided CSR
+  ansible.builtin.copy:
+    content: "{{ horizon_csr }}"
+    dest: "{{ [ horizon_cert_directory_path, 'horizon.csr' ] | path_join }}"
+    owner: root
+    group: nginx
+    mode: '0640'
+  when:
+    - not horizon_generate_default_cert
+    - horizon_csr | length > 0
+  no_log: true
+  diff: false
 
 ##Permissions changes : not incorporated to the cert generation to handle the cases where the certs
 ##already exist or have been created using builtin.command
@@ -74,6 +160,7 @@
   loop_control:
     loop_var: horizon_current_file
   notify: "Horizon - Handlers - Restart nginx services"
+  no_log: true
 
 - name: Nginx_certs - Flush handlers
   ansible.builtin.meta: flush_handlers

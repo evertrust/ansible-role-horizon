@@ -11,15 +11,16 @@ horizon_play_http_secret_key: "{{ lookup('env', 'HORIZON_PLAY_HTTP_SECRET_KEY') 
 horizon_default_ssv_key: "{{ lookup('env', 'HORIZON_DEFAULT_SSV_KEY') }}"
 horizon_event_seal_secret: "{{ lookup('env', 'HORIZON_EVENT_SEAL_SECRET') }}"
 
-# Horizon Package installation
-horizon_version: 2.8.1
-horizon_pkg_uri: "https://repo.evertrust.io/repository/horizon-rpm/horizon-{{ horizon_version }}-1.noarch.rpm" # please check on the repo for the version, as it could be x86_64 or aarch64
+# Evertrust repository credentials (secrets - set via environment variables,
+# see horizon.env.example; can also be overridden as plain Ansible vars)
 horizon_repository_username: "{{ lookup('env', 'EVERTRUST_REPO_USERNAME') | default('CHANGE_THIS_repository_username', true) }}"
 horizon_repository_password: "{{ lookup('env', 'EVERTRUST_REPO_PASSWORD') | default('CHANGE_THIS_repository_password', true) }}"
 
-# Tinkey package installation (required for Horizon >= 2.8)
-horizon_tinkey_version: 1.12.0.1
-horizon_tinkey_pkg_uri: "https://repo.evertrust.io/repository/tinkey-rpm/tinkey-{{ horizon_tinkey_version }}-1.noarch.rpm" # please check on the repo for the version, as it could be x86_64 or aarch64
+# Versions and package URIs have working defaults in default_values.yml
+# (horizon_version, horizon_tinkey_version and matching package checksums,
+# ...). Redefine them here
+# only if you need to pin something else - this file is loaded after
+# default_values.yml so any variable redefined here wins.
 
 # Licence file source path
 horizon_licence_src_path: "{{ lookup('env', 'HORIZON_LICENCE_PATH') | default(playbook_dir ~ '/files/horizon.lic', true) }}"
@@ -43,13 +44,16 @@ horizon_nodes:
 # MongoDB credentials - must be set explicitly (user must be created in MongoDB beforehand)
 horizon_mongodb_username: "{{ lookup('env', 'HORIZON_MONGODB_USERNAME') | default('CHANGE_THIS_mongodb_username', true) }}"
 horizon_mongodb_password: "{{ lookup('env', 'HORIZON_MONGODB_PASSWORD') | default('CHANGE_THIS_mongodb_password', true) }}"
-horizon_mongodb_uri: "mongodb://{{ horizon_mongodb_username }}:{{ horizon_mongodb_password }}@{{ horizon_mongodb_hostname }}:27017/horizon?authSource=admin"
+horizon_mongodb_uri: "mongodb://{{ horizon_mongodb_username | urlencode | replace('/', '%2F') }}:{{ horizon_mongodb_password | urlencode | replace('/', '%2F') }}@{{ horizon_mongodb_hostname }}:27017/horizon?authSource=admin"
 horizon_mongodb_shell_package_uri: "https://repo.mongodb.org/yum/redhat/9Server/mongodb-org/8.0/{{ ansible_facts['architecture'] }}/RPMS/mongodb-mongosh-2.5.8.{{ ansible_facts['architecture'] }}.rpm"
+horizon_mongodb_shell_package_checksum: ""
+horizon_mongodb_shell_gpgkey: "https://pgp.mongodb.com/server-8.0.asc"
+horizon_mongodb_shell_disable_gpg_check: "{{ horizon_disable_gpg_check }}"
 horizon_mongodb_hostname: mongodb-machine
 horizon_mongodb_ip: 10.10.1.6  # Change to your MongoDB server IP
 
 # Akka cluster communication ports
 # These ports must be open between all nodes in the cluster
 horizon_akka_discovery_port: 7626   # Akka Management HTTP port (for discovery and health checks)
-horizon_akka_artery_port: 17335     # Akka Artery port (for cluster communication)
+horizon_akka_artery_port: 17355     # Akka/Pekko Artery port (for cluster communication)
 horizon_internal_api_port: 9000      # Internal API port for Horizon

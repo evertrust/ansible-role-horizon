@@ -1,15 +1,52 @@
 ---
 
-- name: Main - Fail if mandatory secret keys are not set
+- name: Main - Resolve application secrets
+  ansible.builtin.include_tasks: secrets.yml
+
+# All secrets come from environment variables (see horizon.env.example) or can
+# be set directly as Ansible vars (inventory/extra-vars). Fail fast with the
+# full list of what is missing rather than failing mid-deployment.
+- name: Main - Fail if mandatory secrets are not set
   ansible.builtin.fail:
     msg: |
-      Mandatory variable '{{ item.name }}' is not set.
-      Please set the '{{ item.env }}' environment variable before running this role.
-  when: item.value == ''
-  loop:
-    - { name: 'horizon_play_http_secret_key', env: 'HORIZON_PLAY_HTTP_SECRET_KEY', value: "{{ horizon_play_http_secret_key }}" }
-    - { name: 'horizon_default_ssv_key', env: 'HORIZON_DEFAULT_SSV_KEY', value: "{{ horizon_default_ssv_key }}" }
-    - { name: 'horizon_event_seal_secret', env: 'HORIZON_EVENT_SEAL_SECRET', value: "{{ horizon_event_seal_secret }}" }
+      Missing mandatory secret(s):
+      {% for item in horizon_missing_secrets %}
+        - {{ item.name }} (env var: {{ item.env }})
+      {% endfor %}
+      Copy horizon.env.example to horizon.env, fill in your values, then:
+        export $(grep -v '^#' horizon.env | xargs)
+      Alternatively set the variables directly in your inventory.
+  vars:
+    horizon_missing_secrets: >-
+      {{ [
+        { 'name': 'horizon_play_http_secret_key', 'env': 'HORIZON_PLAY_HTTP_SECRET_KEY', 'value': horizon_play_http_secret_key },
+        { 'name': 'horizon_default_ssv_key', 'env': 'HORIZON_DEFAULT_SSV_KEY',
+          'value': horizon_default_ssv_key if (horizon_version.split('-')[0]) is version('2.8', '<') else 'not-required' },
+        { 'name': 'horizon_event_seal_secret', 'env': 'HORIZON_EVENT_SEAL_SECRET', 'value': horizon_event_seal_secret },
+        { 'name': 'horizon_repository_username', 'env': 'EVERTRUST_REPO_USERNAME', 'value': horizon_repository_username },
+        { 'name': 'horizon_repository_password', 'env': 'EVERTRUST_REPO_PASSWORD', 'value': horizon_repository_password },
+        { 'name': 'horizon_mongodb_username', 'env': 'HORIZON_MONGODB_USERNAME', 'value': horizon_mongodb_username },
+        { 'name': 'horizon_mongodb_password', 'env': 'HORIZON_MONGODB_PASSWORD', 'value': horizon_mongodb_password },
+      ] | selectattr('value', 'search', '^$|^CHANGE_THIS') | list }}
+  when: horizon_missing_secrets | length > 0
+  run_once: true
+
+- name: Main - Require checksums when bypassing RPM signature verification
+  ansible.builtin.assert:
+    that:
+      - not (horizon_pkg_disable_gpg_check | bool or horizon_disable_gpg_check | bool) or horizon_pkg_checksum | length > 0
+      - not (horizon_tinkey_disable_gpg_check | bool or horizon_disable_gpg_check | bool) or horizon_tinkey_pkg_checksum | length > 0
+      - not (horizon_cli_disable_gpg_check | bool or horizon_disable_gpg_check | bool) or horizon_cli_pkg_checksum | length > 0 or not horizon_cli_install | bool
+      - not (horizon_mongodb_shell_disable_gpg_check | bool or horizon_disable_gpg_check | bool) or horizon_mongodb_shell_package_checksum | length > 0
+    fail_msg: >-
+      Disabling GPG verification is only allowed for an explicitly approved
+      legacy RPM with a trusted SHA-256 checksum.
+  when: >-
+    horizon_pkg_disable_gpg_check | bool
+    or horizon_tinkey_disable_gpg_check | bool
+    or horizon_cli_disable_gpg_check | bool
+    or horizon_mongodb_shell_disable_gpg_check | bool
+    or horizon_disable_gpg_check | bool
   run_once: true
 
 - name: Main - Set horizon_hostname_node to current inventory hostname
@@ -35,6 +72,129 @@
   ansible.builtin.debug:
     msg: "Node configured as {{ horizon_hostname_node }} with index {{ node_number }}"
 
+- name: Main - Validate declared tenant names and hostnames
+  ansible.builtin.assert:
+    that:
+      - horizon_tenants | selectattr('name', 'defined') | list | length == horizon_tenants | length
+      - horizon_tenants | selectattr('hostname', 'defined') | list | length == horizon_tenants | length
+      - horizon_tenants | map(attribute='name') | list | unique | length == horizon_tenants | length
+      - horizon_tenants | map(attribute='hostname') | list | unique | length == horizon_tenants | length
+      - horizon_tenants | map(attribute='name') | select('match', '^[A-Za-z0-9][A-Za-z0-9_-]*$') | list | length == horizon_tenants | length
+      - horizon_tenants | map(attribute='hostname') | select('match', '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$') | list | length == horizon_tenants | length
+    fail_msg: >-
+      Tenant names and FQDNs must be unique.
+      Tenant names may contain letters, digits, '_' and '-'; hostnames must be FQDNs.
+  when: horizon_tenants | length > 0
+  run_once: true
+
+# Horizon licences are Base64-encoded ASN.1 DER containers. The entitlement,
+# not the number of tenants declared in Ansible, determines the product mode.
+- name: Main - Check that the licence file exists on the controller
+  ansible.builtin.stat:
+    path: "{{ horizon_licence_src_path }}"
+  register: horizon_licence_file
+  delegate_to: localhost
+  become: false
+  when: horizon_licence_check | bool
+
+- name: Main - Require a readable licence file for tenancy validation
+  ansible.builtin.assert:
+    that:
+      - horizon_licence_file.stat.exists
+      - horizon_licence_file.stat.isreg
+      - horizon_licence_file.stat.readable
+    fail_msg: >-
+      Cannot validate Horizon tenancy: licence file '{{ horizon_licence_src_path }}'
+      is missing or unreadable on the controller.
+  delegate_to: localhost
+  become: false
+  when: horizon_licence_check | bool
+
+- name: Main - Validate the licence ASN.1 container
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      openssl base64 -d -A -in {{ horizon_licence_src_path | quote }} |
+      openssl asn1parse -inform DER -i >/dev/null
+    executable: /bin/bash
+  register: horizon_licence_asn1_check
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: horizon_licence_asn1_check.rc != 0
+  no_log: true
+  when: horizon_licence_check | bool
+
+- name: Main - Detect the multitenant licence entitlement
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      openssl base64 -d -A -in {{ horizon_licence_src_path | quote }} |
+      openssl asn1parse -inform DER -i 2>/dev/null |
+      grep -Eq '(^|[:,[:space:]])multitenant([,[:space:]]|$)'
+    executable: /bin/bash
+  register: licence_multitenant_check
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: licence_multitenant_check.rc not in [0, 1]
+  no_log: true
+  when: horizon_licence_check | bool
+
+- name: Main - Determine the Horizon tenancy mode
+  ansible.builtin.set_fact:
+    horizon_deployment_tenancy_mode: >-
+      {{ 'multitenant'
+         if ((horizon_licence_check | bool and licence_multitenant_check.rc == 0)
+             or (not (horizon_licence_check | bool) and horizon_tenants | length > 0))
+         else 'single-tenant' }}
+
+- name: Main - Fail if tenants requested without a multitenant licence
+  ansible.builtin.fail:
+    msg: |
+      You defined {{ horizon_tenants | length }} tenant(s) in horizon_tenants but the licence
+      '{{ horizon_licence_src_path }}' does not carry the 'multitenant' entitlement:
+      Horizon would ignore the X-Tenant header and the tenants would not work.
+      Either deploy single-tenant (horizon_tenants: []), provide a multitenant licence,
+      or set horizon_licence_check: false to deploy the routing anyway.
+  when:
+    - horizon_tenants | length > 0
+    - horizon_licence_check | bool
+    - licence_multitenant_check.rc != 0
+
+- name: Main - Require a supported Horizon version for multitenancy
+  ansible.builtin.assert:
+    that:
+      - (horizon_version.split('-')[0]) is version('2.9', '>=')
+    fail_msg: "The Horizon multitenant entitlement requires Horizon >= 2.9."
+  when: horizon_deployment_tenancy_mode == 'multitenant'
+
+- name: Main - Read previously recorded tenancy mode
+  ansible.builtin.slurp:
+    src: "{{ horizon_tenancy_state_path }}"
+  register: horizon_previous_tenancy_mode
+  failed_when: false
+  changed_when: false
+
+- name: Main - Refuse a multitenant to single-tenant downgrade
+  ansible.builtin.fail:
+    msg: >-
+      This instance was recorded as multitenant but the current licence is
+      single-tenant. Horizon tenancy cannot be downgraded in place. Restore
+      the multitenant licence or provision a new instance.
+  when:
+    - horizon_previous_tenancy_mode.content is defined
+    - horizon_previous_tenancy_mode.content | b64decode | trim == 'multitenant'
+    - horizon_deployment_tenancy_mode == 'single-tenant'
+    - not horizon_allow_tenancy_mode_change
+
+- name: Main - Show tenancy mode
+  ansible.builtin.debug:
+    msg: >-
+      Tenancy: {{ horizon_deployment_tenancy_mode | upper }}{{ ' (' ~
+      (horizon_tenants | map(attribute='name') | join(', ')) ~ ')'
+      if horizon_tenants | length > 0 else '' }}
+
 - name: Installation for Enterprise Linux OS
   ansible.builtin.include_tasks: enterprise_linux_OS_install.yml
 
@@ -44,9 +204,30 @@
 - name: Edit config files
   ansible.builtin.include_tasks: config.yml
 
+- name: Main - Persist the selected tenancy mode
+  ansible.builtin.copy:
+    content: "{{ horizon_deployment_tenancy_mode }}\n"
+    dest: "{{ horizon_tenancy_state_path }}"
+    owner: horizon
+    group: horizon
+    mode: '0640'
+
 - name: Configure firewall
   ansible.builtin.include_tasks: firewall.yml
   when: horizon_configure_firewall | default(true)
 
 - name: Launch Horizon and its necessary services
   ansible.builtin.include_tasks: launching.yml
+
+# Handlers normally run at the end of the play: force them now so nginx and
+# horizon pick up the deployed configuration before the tenant API is probed
+# (the packaged nginx config proxies /ready to 127.0.0.1:7626, which is wrong
+# in HA - waiting behind it would 502 until the timeout).
+- name: Apply pending service restarts before using the API
+  ansible.builtin.meta: flush_handlers
+
+- name: Create the declared tenants through the API
+  ansible.builtin.include_tasks: tenants.yml
+  when:
+    - horizon_tenants | length > 0
+    - horizon_create_tenants | default(true)

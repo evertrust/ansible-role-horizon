@@ -17,26 +17,27 @@ platforms:
       - name: horizon-network
     published_ports:
       - "9001:9000"
-      - "4431:443"
+      - "8443:443"
     groups:
       - horizon_nodes
 
-# Uncomment node below and add it to horizon_nodes group_vars to test with more nodes
-#  - name: horizon-node2
-#    image: geerlingguy/docker-rockylinux9-ansible:latest
-#    command: ""
-#    volumes:
-#      - /sys/fs/cgroup:/sys/fs/cgroup:rw
-#    cgroupns_mode: host
-#    privileged: true
-#    pre_build_image: true
-#    networks:
-#      - name: horizon-network
-#    published_ports:
-#      - "9002:9000"
-#      - "4432:443"
-#    groups:
-#      - horizon_nodes
+  - name: horizon-node2
+    image: geerlingguy/docker-rockylinux9-ansible:latest
+    command: ""
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+    networks:
+      - name: horizon-network
+    published_ports:
+      - "9002:9000"
+      - "8444:443"
+    groups:
+      - horizon_nodes
+
+# Uncomment nodes below and add them to horizon_nodes group_vars to test with more nodes
 #  - name: horizon-node3
 #    image: geerlingguy/docker-rockylinux9-ansible:latest
 #    command: ""
@@ -113,26 +114,27 @@ provisioner:
     host_vars:
       horizon-node1:
         ansible_connection: docker
-      # horizon-node2:
-      #   ansible_connection: docker
+      horizon-node2:
+        ansible_connection: docker
       mongodb-database:
         ansible_connection: docker
     group_vars:
       all:
-        # Horizon secret keys - fixed values for molecule testing (override via env vars in production)
-        horizon_play_http_secret_key: "{{ lookup('env', 'HORIZON_PLAY_HTTP_SECRET_KEY') | default('MoleculeTestPlayHttpSecretKeyForHorizonDoNotUseInProduction1234', true) }}"
-        horizon_default_ssv_key: "{{ lookup('env', 'HORIZON_DEFAULT_SSV_KEY') | default('MoleculeTestDefaultSSVKeyForHorizonDoNotUseInProduction12345678', true) }}"
-        horizon_event_seal_secret: "{{ lookup('env', 'HORIZON_EVENT_SEAL_SECRET') | default('MoleculeTestEventSealSecretForHorizonDoNotUseInProduction12345', true) }}"
+        # Exercise the opt-in generated-secret path by default. Setting any
+        # of these environment variables still verifies customer-provided values.
+        horizon_generate_missing_secrets: true
+        horizon_play_http_secret_key: "{{ lookup('env', 'HORIZON_PLAY_HTTP_SECRET_KEY') | default('', true) }}"
+        horizon_default_ssv_key: "{{ lookup('env', 'HORIZON_DEFAULT_SSV_KEY') | default('', true) }}"
+        horizon_event_seal_secret: "{{ lookup('env', 'HORIZON_EVENT_SEAL_SECRET') | default('', true) }}"
 
         # Horizon package installation
-        horizon_version: 2.8.1
+        horizon_version: "{{ lookup('env', 'HORIZON_VERSION') | default('2.10.2', true) }}"
         horizon_pkg_uri: "https://repo.evertrust.io/repository/horizon-rpm/horizon-{{ horizon_version }}-1.noarch.rpm"
         horizon_repository_username: "{{ lookup('env', 'EVERTRUST_REPO_USERNAME') | default('CHANGE_THIS_repository_username', true) }}"
         horizon_repository_password: "{{ lookup('env', 'EVERTRUST_REPO_PASSWORD') | default('CHANGE_THIS_repository_password', true) }}"
 
-        # Tinkey package installation (used when horizon_version >= 2.8)
-        horizon_tinkey_version: 1.12.0.1
-        horizon_tinkey_pkg_uri: "https://repo.evertrust.io/repository/tinkey-rpm/tinkey-{{ horizon_tinkey_version }}-1.noarch.rpm"
+        # Tinkey: role default is "latest" (resolved from the repository) -
+        # not pinned here so the resolution path is exercised by the tests
 
         # Licence configuration
         horizon_licence_src_path: "{{ lookup('env', 'HORIZON_LICENCE_PATH') | default(playbook_dir ~ '/files/horizon.lic', true) }}"
@@ -147,9 +149,8 @@ provisioner:
         horizon_nodes:
           - hostname: horizon-node1
             ip: horizon-node1
-          # Uncomment to test HA mode:
-          #- hostname: horizon-node2
-          #  ip: horizon-node2
+          - hostname: horizon-node2
+            ip: horizon-node2
 
         # Tinkey KMS - requires horizon_version >= 2.8
         # Soft mode by default (horizon_version < 2.8 always uses soft mode regardless of URI)
@@ -159,12 +160,35 @@ provisioner:
         horizon_tink_credentials_path: "{{ lookup('env', 'HORIZON_TINK_CREDENTIALS_PATH') | default('/opt/horizon/etc/tink-credentials.json', true) }}"
 
         # Extra allowed hosts for local testing (port-mapped access via localhost)
+        # nginx forwards $host (no port), so entries must be portless.
+        # root.horizon.test gives the root tenant a named URL: any FQDN that
+        # is not a tenant vhost lands on the default (root) vhost.
         horizon_extra_allowed_hosts:
           - "127.0.0.1"
+          - "localhost"
+          - "root.horizon.test"
+
+        # Multi-tenancy: exercises tenant vhost rendering and API provisioning.
+        # The licence file is supplied locally / via HORIZON_LICENCE_PATH and
+        # must carry the multitenant entitlement.  Never commit customer licences.
+        # .test TLD on purpose: .local is reserved for mDNS and macOS browsers
+        # resolve it via Bonjour, ignoring /etc/hosts entries.
+        horizon_tenants:
+          - name: tenant1
+            hostname: tenant1.horizon.test
+          - name: tenant2
+            hostname: tenant2.horizon.test
+
+        horizon_licence_check: true
+        horizon_create_tenants: true
+
+        # No client-cert request in the TLS handshake: avoids the browser
+        # certificate picker when testing the UI from the host machine
+        horizon_nginx_ssl_verify_client: "off"
 
         # Akka cluster communication ports
         horizon_akka_discovery_port: 7626
-        horizon_akka_artery_port: 17335
+        horizon_akka_artery_port: 17355
         horizon_internal_api_port: 9000
 
 

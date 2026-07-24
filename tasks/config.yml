@@ -27,12 +27,13 @@
     - /opt/horizon/var/log
     - /opt/horizon/var/run
 
-- name: Config - Symlink
-  ansible.builtin.file:
-    src: /opt/horizon/etc/horizon-httpd.conf
-    dest: /etc/nginx/conf.d/horizon.conf
-    state: link
-    force: true
+# Replaces the packaged symlink (/opt/horizon/etc/horizon-httpd.conf) with a
+# role-managed config so tenant vhosts can be rendered
+- name: Config - Deploy nginx vhost configuration
+  ansible.builtin.template:
+    src: "{{ horizon_template_nginx }}"
+    dest: "{{ horizon_path_to_nginx_conf }}"
+    mode: '0644'
   notify: "Horizon - Handlers - Restart nginx services"
 
 - name: Config - Check if licence file source exists
@@ -41,7 +42,7 @@
   register: licence_file_check
   delegate_to: localhost
   become: false
-  when: 
+  when:
     - horizon_licence_src_path is defined
     - horizon_licence_src_path != ""
     - horizon_licence_src_path != "path_to_your_licence_file"
@@ -54,7 +55,7 @@
       1. Setting HORIZON_LICENCE_PATH environment variable
       2. Setting horizon_licence_src_path in your configuration
       3. Placing the licence file at the specified path
-  when: 
+  when:
     - horizon_licence_src_path is defined
     - horizon_licence_src_path != ""
     - horizon_licence_src_path != "path_to_your_licence_file"
@@ -65,8 +66,11 @@
   ansible.builtin.copy:
     src: "{{ horizon_licence_src_path }}"
     dest: "{{ horizon_licence_dest_path }}"
-    mode: '0644'
-  when: 
+    owner: root
+    group: horizon
+    mode: '0640'
+  diff: false
+  when:
     - horizon_licence_src_path is defined
     - horizon_licence_src_path != ""
     - horizon_licence_src_path != "path_to_your_licence_file"
@@ -80,7 +84,7 @@
       Please provide a Horizon licence file by setting:
       - HORIZON_LICENCE_PATH environment variable, or
       - horizon_licence_src_path in mandatory_vars.yml
-  when: 
+  when:
     - horizon_licence_src_path is not defined or horizon_licence_src_path == "" or horizon_licence_src_path == "path_to_your_licence_file"
 
 - name: Config - Add horizon nodes to /etc/hosts (non-Docker)
@@ -96,27 +100,31 @@
     unsafe_writes: true
   when: ansible_facts['virtualization_type'] != "docker"
 
-- name: Config - Add hosts for Docker environment
-  ansible.builtin.shell: |
-    {% for node in horizon_nodes %}
-    grep -q "{{ node.hostname }}" /etc/hosts || echo "{{ node.ip }} {{ node.hostname }}" >> /etc/hosts
-    {% endfor %}
-    grep -q "{{ horizon_mongodb_hostname }}" /etc/hosts || echo "{{ horizon_mongodb_ip }} {{ horizon_mongodb_hostname }}" >> /etc/hosts
-  args:
-    executable: /bin/bash
+- name: Config - Manage hosts for Docker environment
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^.*\\s{{ item.hostname | regex_escape }}(?:\\s|$).*$'
+    line: "{{ item.ip }} {{ item.hostname }}"
+    state: present
+    unsafe_writes: true
+  loop: "{{ horizon_nodes + [ {'ip': horizon_mongodb_ip, 'hostname': horizon_mongodb_hostname} ] }}"
+  loop_control:
+    label: "{{ item.hostname }}"
   when: ansible_facts['virtualization_type'] == "docker" and (horizon_nodes[0].ip | regex_search('^\d+\.\d+\.\d+\.\d+$') is not none)
-  changed_when: false
 
 - name: Config - File creation /etc/default/horizon
   ansible.builtin.template:
-    src: "../templates/{{ horizon_template_default_horizon }}"
+    src: "{{ horizon_template_default_horizon }}"
     dest: "{{ horizon_path_to_default_horizon }}"
+    mode: '0640'
+  diff: false
   notify: "Horizon - Handlers - Restart horizon services"
 
 - name: Config - Update hosts allowed
   ansible.builtin.template:
-    src: "../templates/{{ horizon_template_hosts_allowed }}"
+    src: "{{ horizon_template_hosts_allowed }}"
     dest: "{{ horizon_path_to_hosts_allowed }}"
+    mode: '0644'
   notify: "Horizon - Handlers - Restart horizon services"
 
 - name: Config - Copy Tinkey KMS/HSM credentials file to VM
@@ -131,7 +139,66 @@
     - horizon_tink_master_key_uri != ""
     - horizon_tink_credentials_src_path != ""
 
-- name: Config - Generate the tink key on node 1 (soft mode)
+- name: Config - Check whether the Horizon cluster keyset already exists
+  ansible.builtin.stat:
+    path: /opt/horizon/etc/horizon.keyset
+    checksum_algorithm: sha256
+  register: horizon_keyset_file
+  when:
+    - (horizon_version.split('-')[0]) is version('2.8', '>=')
+    - horizon_nodes | length > 1
+
+- name: Config - Refuse incomplete HA keyset bootstrap
+  ansible.builtin.assert:
+    that:
+      - ansible_play_hosts_all | sort == (horizon_nodes | map(attribute='hostname') | list | sort)
+      - not horizon_keyset_file.stat.exists
+      - hostvars[item].get('horizon_keyset_file', {}).get('stat', {}).get('exists', false) == false
+    fail_msg: >-
+      The Horizon keyset is missing on the stable leader. A new HA keyset may
+      only be generated when every declared node is targeted and no node has
+      an existing keyset. Restore the original keyset instead of regenerating it.
+  loop: "{{ ansible_play_hosts_all }}"
+  when:
+    - (horizon_version.split('-')[0]) is version('2.8', '>=')
+    - horizon_nodes | length > 1
+    - inventory_hostname == horizon_nodes[0].hostname
+    - not horizon_keyset_file.stat.exists
+
+- name: Config - Refuse divergent Horizon keysets
+  ansible.builtin.assert:
+    that:
+      - hostvars[item].get('horizon_keyset_file', {}).get('stat', {}).get('checksum', '') == horizon_keyset_file.stat.checksum
+    fail_msg: >-
+      Horizon keyset on '{{ item }}' differs from the stable leader
+      '{{ horizon_nodes[0].hostname }}'. Restore a known-good keyset before
+      changing this cluster.
+  loop: "{{ ansible_play_hosts_all }}"
+  when:
+    - (horizon_version.split('-')[0]) is version('2.8', '>=')
+    - horizon_nodes | length > 1
+    - inventory_hostname == horizon_nodes[0].hostname
+    - horizon_keyset_file.stat.exists
+    - item != horizon_nodes[0].hostname
+    - hostvars[item].get('horizon_keyset_file', {}).get('stat', {}).get('exists', false)
+  no_log: true
+
+- name: Config - Require the keyset leader when a missing keyset must be shared
+  ansible.builtin.assert:
+    that:
+      - horizon_nodes[0].hostname in ansible_play_hosts_all
+    fail_msg: >-
+      Horizon keyset is missing on '{{ inventory_hostname }}', but the stable
+      leader '{{ horizon_nodes[0].hostname }}' is not targeted by this play.
+      Include the leader so the shared keyset can be read safely.
+  when:
+    - (horizon_version.split('-')[0]) is version('2.8', '>=')
+    - horizon_nodes | length > 1
+    - inventory_hostname != horizon_nodes[0].hostname
+    - not horizon_keyset_file.stat.exists
+    - horizon_nodes[0].hostname not in ansible_play_hosts_all
+
+- name: Config - Generate the tink key on the stable leader (soft mode)
   ansible.builtin.shell: /opt/evertrust/tinkey/bin/tinkey create-keyset --key-template AES256_GCM --out=/opt/horizon/etc/horizon.keyset
   args:
     creates: /opt/horizon/etc/horizon.keyset
@@ -141,7 +208,7 @@
     - horizon_nodes | length > 1
     - horizon_tink_master_key_uri == ""
 
-- name: Config - Generate the tink key on node 1 (KMS/HSM mode)
+- name: Config - Generate the tink key on the stable leader (KMS/HSM mode)
   ansible.builtin.shell: >-
     /opt/evertrust/tinkey/bin/tinkey create-keyset --key-template AES256_GCM
     --out=/opt/horizon/etc/horizon.keyset
@@ -155,23 +222,31 @@
     - horizon_nodes | length > 1
     - horizon_tink_master_key_uri != ""
 
-- name: Config - Copy keyset file content on control node
+- name: Config - Read keyset file from the stable leader
   ansible.builtin.slurp:
     src: /opt/horizon/etc/horizon.keyset
   register: horizon_keyset
+  no_log: true
   when:
     - (horizon_version.split('-')[0]) is version('2.8', '>=')
     - inventory_hostname == horizon_nodes[0].hostname
     - horizon_nodes | length > 1
 
-- name: Config - Distribute the file to other nodes
+- name: Config - Distribute a missing keyset to other nodes
   ansible.builtin.copy:
     content: "{{ hostvars[horizon_nodes[0].hostname]['horizon_keyset']['content'] | b64decode }}"
     dest: "/opt/horizon/etc/horizon.keyset"
+    owner: horizon
+    group: horizon
+    mode: '0640'
+  no_log: true
+  diff: false
   when:
     - (horizon_version.split('-')[0]) is version('2.8', '>=')
     - inventory_hostname != horizon_nodes[0].hostname
     - horizon_nodes | length > 1
+    - not horizon_keyset_file.stat.exists
+    - horizon_nodes[0].hostname in ansible_play_hosts_all
 
 - name: Config - Generate keyset for standalone node (soft mode)
   ansible.builtin.shell: /opt/evertrust/tinkey/bin/tinkey create-keyset --key-template AES256_GCM --out=/opt/horizon/etc/horizon.keyset
@@ -202,4 +277,3 @@
     group: horizon
     mode: '0640'
   when: (horizon_version.split('-')[0]) is version('2.8', '>=')
-

@@ -1,7 +1,52 @@
 ---
 
+# Horizon package installation
+# Override in mandatory_vars.yml or your inventory to pin another version
+horizon_version: "{{ lookup('env', 'HORIZON_VERSION') | default('2.10.2', true) }}"
+horizon_pkg_uri: "https://repo.evertrust.io/repository/horizon-rpm/horizon-{{ horizon_version }}-1.noarch.rpm" # check the repo: arch may be x86_64 or aarch64
+# The repository does not publish the public key for this legacy RPM (key id
+# 3e7e110df44c0ca2).  Keep the exception scoped to this artefact and pin its
+# SHA-256; override both values together for another Horizon release.
+horizon_pkg_checksum: "sha256:8845f4f90cd6ed4b80ebbd1b9b37b3c29d5a7fb8cb2c41b6daf76c1fcd8f5e5a"
+horizon_pkg_disable_gpg_check: true
+# Legacy compatibility switch. Prefer the per-package switches below so an
+# unsigned Evertrust artefact never disables verification of MongoDB RPMs.
+horizon_disable_gpg_check: false
+
+# Tinkey package installation (required for Horizon >= 2.8)
+# Pin the auxiliary tools by default so a Horizon deployment is reproducible.
+# Operators may explicitly set "latest" when they have validated a compatible
+# release in their own environment.
+# The tinkey RPM declares no dependency but its launcher is `java -jar`:
+# Horizon 2.10 no longer bundles nor installs Java automatically; the role
+# installs Java 17 for Tinkey and the Horizon runtime.
+horizon_tinkey_java_package: java-17-openjdk-headless
+horizon_tinkey_version: 1.13.0
+horizon_tinkey_fallback_version: 1.13.0
+horizon_tinkey_pkg_uri: "https://repo.evertrust.io/repository/tinkey-rpm/tinkey-{{ horizon_tinkey_version }}-1.noarch.rpm"
+horizon_tinkey_pkg_checksum: "sha256:baade189e1e11e134ad22587b08b5f85110df5889b8812b5c1c4c83edc2c55dd"
+horizon_tinkey_disable_gpg_check: true
+horizon_tinkey_search_uri: "https://repo.evertrust.io/service/rest/v1/search/assets?repository=tinkey-rpm&sort=version&direction=desc"
+
+# Horizon CLI installation (RPMs are published for x86_64 only; the install is
+# skipped with a notice on other architectures). It is pinned by default for a
+# reproducible deployment; "latest" remains an explicit operator opt-in.
+horizon_cli_install: true
+horizon_cli_version: 1.17.1
+horizon_cli_fallback_version: 1.17.1
+horizon_cli_pkg_uri: "https://repo.evertrust.io/repository/horizon-cli-rpm/horizon-cli-{{ horizon_cli_version }}-1.x86_64.rpm"
+horizon_cli_pkg_checksum: "sha256:0eaee2101c137f43ad555b530e2ca418804d5f69cb4472736dd74924fc751cb9"
+horizon_cli_disable_gpg_check: true
+horizon_cli_search_uri: "https://repo.evertrust.io/service/rest/v1/search/assets?repository=horizon-cli-rpm&sort=version&direction=desc"
+
 # Licence file path
 horizon_licence_dest_path: /opt/horizon/etc/horizon.lic
+
+# By default, missing application secrets fail the deployment.  Set this to
+# true only for an initial deployment to generate 128-character hexadecimal
+# values once; generated values are persisted root-only on every node.
+horizon_generate_missing_secrets: false
+horizon_generated_secrets_path: /etc/evertrust/horizon-generated-secrets.yml
 
 # SSL/TLS certificate configuration
 horizon_cert_directory_path: /etc/nginx/ssl
@@ -12,24 +57,82 @@ horizon_cert_organization: org
 horizon_cert_organizational_unit: ou
 horizon_cert_common_name: cn
 horizon_cert_hashing_algo: "sha256"
+# SANs of the generated self-signed certificate: all node hostnames + all tenant FQDNs
+horizon_cert_san_hosts: "{{ ((horizon_nodes | map(attribute='hostname') | list) + (horizon_tenants | default([]) | map(attribute='hostname') | list)) | unique }}"
+# Certificates are not silently replaced when the inventory/tenant SAN set
+# changes. Set this explicit opt-in only for a controlled self-signed renewal.
+horizon_regenerate_self_signed_certificate_on_san_change: false
 
 # Template names (just filename, Ansible finds in templates/)
 horizon_template_default_horizon: etc_default_horizon.j2
 horizon_template_hosts_allowed: hosts_allowed.j2
+horizon_template_nginx: horizon_httpd.conf.j2
 
 # Paths to configuration files inside the VM
 horizon_path_to_default_horizon: /etc/default/horizon
 horizon_path_to_hosts_allowed: /opt/horizon/etc/conf.d/horizon-extra.conf
+horizon_path_to_nginx_conf: /etc/nginx/conf.d/horizon.conf
+
+# Multi-tenancy (Horizon >= 2.9, requires a licence with the "multitenant" entitlement)
+# The deployment mode is YOUR choice: horizon_tenants non-empty = multitenant
+# routing deployed, empty = single-tenant. As a safety net, the role decodes
+# and parses the licence ASN.1 container on the controller, then fails if
+# tenants are requested without the multitenant entitlement (set
+# horizon_licence_check: false to deploy the routing anyway). OpenSSL must be
+# available on the controller when this check is enabled.
+horizon_licence_check: true
+# Each tenant is exposed on its own FQDN: nginx selects the tenant by setting
+# the X-Tenant header on the matching vhost. The default vhost (node hostname)
+# keeps serving the instance scope (administration).
+# horizon_tenants:
+#   - name: tenant1
+#     hostname: tenant1.horizon.example.com
+#   - name: tenant2
+#     hostname: tenant2.horizon.example.com
+horizon_tenants: []
+
+# The product cannot switch an instance between single-tenant and multitenant
+# after provisioning. The role stores the selected mode on first deployment
+# and refuses a later change unless this emergency override is set.
+horizon_tenancy_state_path: /opt/horizon/var/run/ansible-tenancy-mode
+horizon_allow_tenancy_mode_change: false
+
+# When false (default), the default vhost strips any client-supplied X-Tenant
+# header so tenant selection can only happen through the dedicated tenant vhosts.
+# Set to true to let API clients address a tenant directly with their own
+# X-Tenant header on the default vhost.
+horizon_tenant_header_passthrough: false
+
+# Automatic tenant creation through the root-scope API after the service is
+# up: each entry of horizon_tenants missing on the instance is created.
+# Authentication uses horizon_admin_password when set, otherwise the bootstrap
+# administrator password generated by Horizon on first start. Optional per-
+# tenant keys: description, certificate_limit, certificate_module (clm|pki),
+# admin_password (initial tenant administrator password; when omitted the
+# generated one is saved on the node in
+# /opt/horizon/var/run/tenant-<name>-adminPassword).
+horizon_create_tenants: true
+horizon_admin_username: administrator
+horizon_admin_password: ""
+horizon_tenant_default_certificate_limit: 100
+horizon_tenant_default_certificate_module: clm
 
 # Certificate generation and custom certs
 horizon_generate_default_cert: true
-horizon_csr: "" #path to the web server certificate csr
-horizon_pem: "" #path to the web server certificate pem
-horizon_key: "" #path to the key
-horizon_chain_pem: "" #path to the certificate's trust chain
+horizon_csr: "" # optional CSR content, retained only for operator reference
+horizon_pem: "" # PEM certificate content (not a controller file path)
+horizon_key: "" # PEM private-key content (not a controller file path)
+horizon_chain_pem: "" # PEM full-chain content (not a controller file path)
 
 # Web server
 horizon_web_server: nginx
+
+# Client-certificate request during the TLS handshake (packaged Horizon
+# default: optional_no_ca, required for X.509 certificate authentication,
+# EST/SCEP client-cert flows...). Browsers holding client identities show a
+# certificate picker on every connection; set to "off" if you do not use
+# certificate-based authentication.
+horizon_nginx_ssl_verify_client: optional_no_ca
 
 # Tinkey configuration (required for Horizon >= 2.8)
 # Soft mode (default): leave horizon_tink_master_key_uri empty — keyset generated as plaintext locally
@@ -39,6 +142,13 @@ horizon_web_server: nginx
 horizon_tink_master_key_uri: "{{ lookup('env', 'HORIZON_TINK_MASTER_KEY_URI') }}"
 horizon_tink_credentials_path: "{{ lookup('env', 'HORIZON_TINK_CREDENTIALS_PATH') | default('/opt/horizon/etc/tink-credentials.json', true) }}"
 horizon_tink_credentials_src_path: "{{ lookup('env', 'HORIZON_TINK_CREDENTIALS_SRC_PATH') | default('', true) }}"
+
+# Explicit CIDRs/IPs allowed to reach the HA-only cluster ports. When empty,
+# the role derives private addresses from gathered facts for declared nodes.
+horizon_firewall_cluster_sources: []
+# Remove old globally-open cluster ports created by pre-hardening role versions.
+# This is deliberately opt-in because those rules may be managed externally.
+horizon_remove_legacy_public_cluster_firewall_rules: false
 
 # Extra hosts to allow in Play filters (e.g. load balancer, localhost for testing)
 horizon_extra_allowed_hosts: []
