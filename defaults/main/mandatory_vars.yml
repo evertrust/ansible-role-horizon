@@ -1,52 +1,59 @@
 ---
+
 # Horizon mandatory variables - change these to your own secure values
 
-# Firewall configuration
-horizon_configure_firewall: true # Set to true to configure firewall rules, false to skip firewall configuration
+# Firewall configuration,set to true to configure firewall rules, false to skip firewall configuration
+horizon_configure_firewall: true
 
-# Horizon secret keys - generate secure random keys for your deployment, if you want to use custom keys, replace the openssl commands with your own keys
-horizon_play_http_secret_key: "CHANGE_THIS_horizon_play_http_secret_key"
-horizon_default_ssv_key: "CHANGE_THIS_horizon_default_ssv_key"
-horizon_event_seal_secret: "CHANGE_THIS_horizon_event_seal_secret"
+# Horizon secret keys - random string with special chars (@!#), 128 characters
+# These MUST be set via environment variables - the role will fail if any of them are missing
+horizon_play_http_secret_key: "{{ lookup('env', 'HORIZON_PLAY_HTTP_SECRET_KEY') }}"
+horizon_default_ssv_key: "{{ lookup('env', 'HORIZON_DEFAULT_SSV_KEY') }}"
+horizon_event_seal_secret: "{{ lookup('env', 'HORIZON_EVENT_SEAL_SECRET') }}"
 
-# Horizon Package installation
-horizon_version: 2.7.9-1
-horizon_pkg_uri: "https://repo.evertrust.io/repository/horizon-rpm/horizon-{{ horizon_version }}.noarch.rpm"
-horizon_repository_username: "CHANGE_THIS_repo_user"
-horizon_repository_password: "CHANGE_THIS_repo_password"
+# Evertrust repository credentials (secrets - set via environment variables,
+# see horizon.env.example; can also be overridden as plain Ansible vars)
+horizon_repository_username: "{{ lookup('env', 'EVERTRUST_REPO_USERNAME') | default('CHANGE_THIS_repository_username', true) }}"
+horizon_repository_password: "{{ lookup('env', 'EVERTRUST_REPO_PASSWORD') | default('CHANGE_THIS_repository_password', true) }}"
+
+# Versions and package URIs have working defaults in default_values.yml
+# (horizon_version, horizon_tinkey_version and matching package checksums,
+# ...). Redefine them here
+# only if you need to pin something else - this file is loaded after
+# default_values.yml so any variable redefined here wins.
 
 # Licence file source path
-horizon_licence_src_path: "{{ playbook_dir }}/files/horizon.lic"
+horizon_licence_src_path: "{{ lookup('env', 'HORIZON_LICENCE_PATH') | default(playbook_dir ~ '/files/horizon.lic', true) }}"
 
 # Cluster nodes configuration - change these to match your environment
 # Set the hostname and IP address for each Horizon node in your cluster
 # For testing with Molecule, these values will be overridden in molecule.yml
 horizon_nodes:
   - hostname: horizon-node1
-    ip: 10.10.21.1  # Change to your actual IP
+    ip: 10.10.1.1  # Change to your actual IP
   - hostname: horizon-node2
-    ip: 10.10.21.2 # Change to your actual IP
+    ip: 10.10.1.2  # Change to your actual IP
 #  - hostname: horizon-node3
-#    ip: 10.10.21.3
+#    ip: 10.10.1.3
 #  - hostname: horizon-node4
-#    ip: 10.10.21.4
+#    ip: 10.10.1.4
 #  - hostname: horizon-node5
-#    ip: 10.10.21.5
+#    ip: 10.10.1.5
 
 # MongoDB configuration
-# MongoDB Shell package URI, as for now, we only support MongoDB 7.0 and 8.0.
-# Example format: mongodb://username:password@mongodb-host:27017/horizon?authSource=admin # Adjust as needed
-horizon_mongodb_uri: "mongodb://horizon:evertrust123@10.10.21.6:27017/horizon?authSource=admin"  # Set your MongoDB connection URI
-horizon_mongodb_shell_package_uri: https://repo.mongodb.org/yum/redhat/9Server/mongodb-org/8.0/aarch64/RPMS/mongodb-mongosh-2.5.8.aarch64.rpm 
-horizon_mongodb_hostname: mongodb-vm
-horizon_mongodb_ip: 10.10.21.6  # Change to your MongoDB server IP
+# MongoDB credentials - must be set explicitly (user must be created in MongoDB beforehand)
+horizon_mongodb_username: "{{ lookup('env', 'HORIZON_MONGODB_USERNAME') | default('CHANGE_THIS_mongodb_username', true) }}"
+horizon_mongodb_password: "{{ lookup('env', 'HORIZON_MONGODB_PASSWORD') | default('CHANGE_THIS_mongodb_password', true) }}"
+horizon_mongodb_uri: "mongodb://{{ horizon_mongodb_username | urlencode | replace('/', '%2F') }}:{{ horizon_mongodb_password | urlencode | replace('/', '%2F') }}@{{ horizon_mongodb_hostname }}:27017/horizon?authSource=admin"
+horizon_mongodb_shell_package_uri: "https://repo.mongodb.org/yum/redhat/9Server/mongodb-org/8.0/{{ ansible_facts['architecture'] }}/RPMS/mongodb-mongosh-2.5.8.{{ ansible_facts['architecture'] }}.rpm"
+horizon_mongodb_shell_package_checksum: ""
+horizon_mongodb_shell_gpgkey: "https://pgp.mongodb.com/server-8.0.asc"
+horizon_mongodb_shell_disable_gpg_check: "{{ horizon_disable_gpg_check }}"
+horizon_mongodb_hostname: mongodb-machine
+horizon_mongodb_ip: 10.10.1.6  # Change to your MongoDB server IP
 
-# Pekko/Akka cluster communication ports
+# Akka cluster communication ports
 # These ports must be open between all nodes in the cluster
-horizon_pekko_discovery_port: 7626   # Pekko Management HTTP port (for discovery and health checks)
-horizon_pekko_artery_port: 17335     # Pekko Artery port (for cluster communication)
-
-# Load balancer configuration - change these to match your environment
-horizon_use_load_balancer: false  # Set to true if using a load balancer in front of Horizon nodes
-horizon_load_balancer_hostname: load_balancer
-horizon_load_balancer_ip: 10.10.21.7  # Change to your load balancer IP
+horizon_akka_discovery_port: 7626   # Akka Management HTTP port (for discovery and health checks)
+horizon_akka_artery_port: 17355     # Akka/Pekko Artery port (for cluster communication)
+horizon_internal_api_port: 9000      # Internal API port for Horizon

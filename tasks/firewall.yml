@@ -1,10 +1,11 @@
 ---
+
 - name: Firewall - Check if firewalld is installed
   ansible.builtin.package_facts:
     manager: auto
 
 - name: Firewall - Install firewalld if not present
-  ansible.builtin.yum:
+  ansible.builtin.dnf:
     name: firewalld
     state: present
   when: "'firewalld' not in ansible_facts.packages"
@@ -13,34 +14,124 @@
   ansible.builtin.systemd:
     name: firewalld
     state: started
-    enabled: yes
+    enabled: true
 
 - name: Firewall - Ensure SSH is allowed
   ansible.posix.firewalld:
     service: ssh
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
 
-- name: Firewall - Open HTTPS port (443)
+- name: Firewall - Open HTTPS port
   ansible.posix.firewalld:
     port: 443/tcp
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
 
-- name: Firewall - Open PEKKO Management HTTP port
-  ansible.posix.firewalld:
-    port: "{{ horizon_pekko_discovery_port }}/tcp"
-    permanent: yes
-    state: enabled
-    immediate: yes
-  when: horizon_nodes | length > 1  # Only for HA clusters
+- name: Firewall - Derive cluster sources from targeted nodes
+  ansible.builtin.set_fact:
+    horizon_derived_firewall_cluster_sources: >-
+      {{ (horizon_derived_firewall_cluster_sources | default([]))
+         + [horizon_firewall_source_candidate] }}
+  vars:
+    horizon_firewall_source_candidate: >-
+      {{ hostvars.get(item.hostname, {}).get('ansible_default_ipv4', {}).get(
+           'address', hostvars.get(item.hostname, {}).get(
+           'ansible_host', item.ip | default(''))) }}
+  loop: "{{ horizon_nodes }}"
+  when:
+    - horizon_nodes | length > 1
+    - horizon_firewall_source_candidate is match('^([0-9]{1,3}\\.){3}[0-9]{1,3}(/[0-9]{1,2})?$') or ':' in horizon_firewall_source_candidate
 
-- name: Firewall - Open PEKKO Artery port for cluster communication
+- name: Firewall - Select effective cluster sources
+  ansible.builtin.set_fact:
+    horizon_effective_firewall_cluster_sources: >-
+      {{ (horizon_firewall_cluster_sources
+          + (horizon_derived_firewall_cluster_sources | default([]))) | unique | list }}
+  when: horizon_nodes | length > 1
+
+- name: Firewall - Require private sources for HA cluster ports
+  ansible.builtin.assert:
+    that:
+      - horizon_effective_firewall_cluster_sources | length > 0
+      - "'0.0.0.0' not in horizon_effective_firewall_cluster_sources"
+      - "'0.0.0.0/0' not in horizon_effective_firewall_cluster_sources"
+      - "'::' not in horizon_effective_firewall_cluster_sources"
+      - "'::/0' not in horizon_effective_firewall_cluster_sources"
+      - horizon_effective_firewall_cluster_sources | select('search', '/0$') | list | length == 0
+    fail_msg: >-
+      Horizon HA cluster ports are never opened publicly. Provide
+      horizon_firewall_cluster_sources as IPs/CIDRs, or ensure Ansible gathers
+      an IPv4/IPv6 address for every declared Horizon node. Set
+      horizon_configure_firewall: false when Terraform owns host firewalling.
+  when: horizon_nodes | length > 1
+
+- name: Firewall - Read the previously role-managed cluster sources
+  ansible.builtin.slurp:
+    src: /etc/evertrust/horizon-firewall-cluster-sources.yml
+  register: horizon_previous_firewall_sources_file
+  failed_when: false
+  changed_when: false
+  no_log: true
+  when: horizon_nodes | length > 1
+
+- name: Firewall - Decode the previously role-managed cluster sources
+  ansible.builtin.set_fact:
+    horizon_previous_firewall_cluster_sources: >-
+      {{ horizon_previous_firewall_sources_file.content | b64decode | from_yaml
+         if horizon_previous_firewall_sources_file.content is defined else [] }}
+  no_log: true
+  when: horizon_nodes | length > 1
+
+- name: Firewall - Remove obsolete role-managed HA rules
   ansible.posix.firewalld:
-    port: "{{ horizon_pekko_artery_port }}/tcp"
-    permanent: yes
+    rich_rule: 'rule family="{{ "ipv6" if ":" in item.0 else "ipv4" }}" source address="{{ item.0 }}" port port="{{ item.1 }}" protocol="tcp" accept'
+    permanent: true
+    state: disabled
+    immediate: true
+  loop: "{{ horizon_previous_firewall_cluster_sources | product([horizon_akka_discovery_port, horizon_akka_artery_port]) | list }}"
+  when:
+    - horizon_nodes | length > 1
+    - item.0 not in horizon_effective_firewall_cluster_sources
+
+- name: Firewall - Allow HA ports only from cluster sources
+  ansible.posix.firewalld:
+    rich_rule: 'rule family="{{ "ipv6" if ":" in item.0 else "ipv4" }}" source address="{{ item.0 }}" port port="{{ item.1 }}" protocol="tcp" accept'
+    permanent: true
     state: enabled
-    immediate: yes
-  when: horizon_nodes | length > 1  # Only for HA clusters
+    immediate: true
+  loop: "{{ horizon_effective_firewall_cluster_sources | product([horizon_akka_discovery_port, horizon_akka_artery_port]) | list }}"
+  when: horizon_nodes | length > 1
+
+- name: Firewall - Ensure the role state directory exists
+  ansible.builtin.file:
+    path: /etc/evertrust
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  when: horizon_nodes | length > 1
+
+- name: Firewall - Persist the role-managed HA source set
+  ansible.builtin.copy:
+    content: "{{ horizon_effective_firewall_cluster_sources | to_nice_yaml(indent=2) }}"
+    dest: /etc/evertrust/horizon-firewall-cluster-sources.yml
+    owner: root
+    group: root
+    mode: '0600'
+  when: horizon_nodes | length > 1
+
+- name: Firewall - Remove legacy public HA ports on explicit migration
+  ansible.posix.firewalld:
+    port: "{{ item }}/tcp"
+    permanent: true
+    state: disabled
+    immediate: true
+  loop:
+    - "{{ horizon_akka_discovery_port }}"
+    - "{{ horizon_akka_artery_port }}"
+  when:
+    - horizon_nodes | length > 1
+    - horizon_remove_legacy_public_cluster_firewall_rules | bool

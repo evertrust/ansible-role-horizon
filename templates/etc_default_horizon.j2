@@ -4,7 +4,7 @@ JVM_MAX_MEMORY=3072m
 JVM_TYPE=server
 
 # Play variables
-PLAY_HTTP_PORT=9000
+PLAY_HTTP_PORT={{ horizon_internal_api_port }}
 PLAY_HTTP_ADDRESS=127.0.0.1
 PLAY_CONFIG_FILE=/opt/horizon/etc/horizon.conf
 PLAY_LOGGER_FILE=/opt/horizon/etc/horizon-logback.xml
@@ -17,17 +17,24 @@ MONGODB_URI="{{ horizon_mongodb_uri }}"
 # Horizon variables
 HORIZON_NOTIFICATION_SMTP_HOST=127.0.0.1
 HORIZON_HOSTNAME={{ horizon_hostname_node }}
+{% if (horizon_version.split('-')[0]) is version('2.8', '<') %}
 HORIZON_DEFAULT_SSV_KEY={{ horizon_default_ssv_key }}
+{% endif %}
 HORIZON_EVENT_SEAL_SECRET={{ horizon_event_seal_secret }}
+{% if (horizon_version.split('-')[0]) is version('2.8', '>=') %}
+HORIZON_TINK_MASTER_KEY_URI={{ horizon_tink_master_key_uri }}
+HORIZON_TINK_CREDENTIALS_PATH={{ horizon_tink_credentials_path }}
+{% endif %}
 
 # Akka nodes for HA
 # All HA nodes in hostname:port format, comma separated
-PEKKO_DISCOVERY_ENDPOINTS={% for node in horizon_nodes %}{{ node.hostname }}:{{ horizon_pekko_discovery_port }}{% if not loop.last %},{% endif %}{% endfor %}
+AKKA_DISCOVERY_ENDPOINTS={% if horizon_nodes | length > 1 %}{% for node in horizon_nodes %}{{ node.hostname }}:{{ horizon_akka_discovery_port }}{% if not loop.last %},{% endif %}{% endfor %}{% endif %}
 
 # The index of this machine's node in the above list. Index starts at 0
-PEKKO_MANAGEMENT_LOCAL={{ node_number }}
+AKKA_MANAGEMENT_LOCAL={{ node_number if horizon_nodes | length > 1 else '' }}
+
 # The port used for communication between nodes, in hostname:port format
-PEKKO_ARTERY={{ horizon_hostname_node }}:{{ horizon_pekko_artery_port }}
+AKKA_ARTERY={{ (horizon_hostname_node ~ ':' ~ horizon_akka_artery_port) if horizon_nodes | length > 1 else '' }}
 
 # x509 authentication header
 CERTIFICATE_HEADER=SSL_CLIENT_CERT

@@ -2,6 +2,19 @@ galaxy_info:
   role_name: ansible_role_horizon
   namespace: evertrust
   author: evertrust
-  description: Deployment of Horizon in HA using RPMs v2 using Dynamic inventory
+  description: Deployment of Horizon in Standalone or HA using RPMs
   company: EVERTRUST
-  min_ansible_version: "2.1"
+  min_ansible_version: "2.17"
+  license: proprietary
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+  galaxy_tags:
+    - horizon
+    - evertrust
+    - pki
+    - clm
+    - certificates
+
+dependencies: []

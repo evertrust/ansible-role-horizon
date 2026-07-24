@@ -1,4 +1,5 @@
 ---
+
 driver:
   name: docker
 
@@ -16,6 +17,7 @@ platforms:
       - name: horizon-network
     published_ports:
       - "9001:9000"
+      - "8443:443"
     groups:
       - horizon_nodes
 
@@ -31,8 +33,58 @@ platforms:
       - name: horizon-network
     published_ports:
       - "9002:9000"
+      - "8444:443"
     groups:
       - horizon_nodes
+
+# Uncomment nodes below and add them to horizon_nodes group_vars to test with more nodes
+#  - name: horizon-node3
+#    image: geerlingguy/docker-rockylinux9-ansible:latest
+#    command: ""
+#    volumes:
+#      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+#    cgroupns_mode: host
+#    privileged: true
+#    pre_build_image: true
+#    networks:
+#      - name: horizon-network
+#    published_ports:
+#      - "9003:9000"
+#      - "4433:443"
+#    groups:
+#      - horizon_nodes
+
+#  - name: horizon-node4
+#    image: geerlingguy/docker-rockylinux9-ansible:latest
+#    command: ""
+#    volumes:
+#      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+#    cgroupns_mode: host
+#    privileged: true
+#    pre_build_image: true
+#    networks:
+#      - name: horizon-network
+#    published_ports:
+#      - "9004:9000"
+#      - "4434:443"
+#    groups:
+#      - horizon_nodes
+
+#  - name: horizon-node5
+#    image: geerlingguy/docker-rockylinux9-ansible:latest
+#    command: ""
+#    volumes:
+#      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+#    cgroupns_mode: host
+#    privileged: true
+#    pre_build_image: true
+#    networks:
+#      - name: horizon-network
+#    published_ports:
+#      - "9005:9000"
+#      - "4435:443"
+#    groups:
+#      - horizon_nodes
 
   # MongoDB database server
   - name: mongodb-database
@@ -55,8 +107,9 @@ provisioner:
   config_options:
     defaults:
       host_key_checking: false
-      callbacks_enabled: profile_tasks, timer, yaml
-      stdout_callback: yaml
+      callbacks_enabled: timer
+      stdout_callback: default
+      result_format: yaml
   inventory:
     host_vars:
       horizon-node1:
@@ -67,22 +120,28 @@ provisioner:
         ansible_connection: docker
     group_vars:
       all:
-        # Horizon secret keys
-        horizon_play_http_secret_key: "CHANGE_THIS_horizon_play_http_secret_key"
-        horizon_default_ssv_key: "CHANGE_THIS_horizon_default_ssv_key"
-        horizon_event_seal_secret: "CHANGE_THIS_horizon_event_seal_secret"
+        # Exercise the opt-in generated-secret path by default. Setting any
+        # of these environment variables still verifies customer-provided values.
+        horizon_generate_missing_secrets: true
+        horizon_play_http_secret_key: "{{ lookup('env', 'HORIZON_PLAY_HTTP_SECRET_KEY') | default('', true) }}"
+        horizon_default_ssv_key: "{{ lookup('env', 'HORIZON_DEFAULT_SSV_KEY') | default('', true) }}"
+        horizon_event_seal_secret: "{{ lookup('env', 'HORIZON_EVENT_SEAL_SECRET') | default('', true) }}"
 
         # Horizon package installation
-        horizon_version: 2.7.9-1
-        horizon_pkg_uri: "https://repo.evertrust.io/repository/horizon-rpm/horizon-{{ horizon_version }}.noarch.rpm"
-        horizon_repository_username: "CHANGE_THIS_repo_user"
-        horizon_repository_password: "CHANGE_THIS_repo_password"
+        horizon_version: "{{ lookup('env', 'HORIZON_VERSION') | default('2.10.2', true) }}"
+        horizon_pkg_uri: "https://repo.evertrust.io/repository/horizon-rpm/horizon-{{ horizon_version }}-1.noarch.rpm"
+        horizon_repository_username: "{{ lookup('env', 'EVERTRUST_REPO_USERNAME') | default('CHANGE_THIS_repository_username', true) }}"
+        horizon_repository_password: "{{ lookup('env', 'EVERTRUST_REPO_PASSWORD') | default('CHANGE_THIS_repository_password', true) }}"
+
+        # Tinkey: role default is "latest" (resolved from the repository) -
+        # not pinned here so the resolution path is exercised by the tests
 
         # Licence configuration
-        horizon_licence_src_path: "{{ playbook_dir }}/files/horizon2.lic"
+        horizon_licence_src_path: "{{ lookup('env', 'HORIZON_LICENCE_PATH') | default(playbook_dir ~ '/files/horizon.lic', true) }}"
 
-        # MongoDB configuration
-        horizon_mongodb_uri: "mongodb://admin:evertrust123@mongodb-database:27017/horizon?authSource=admin" # Adapt as needed
+        # MongoDB configuration - credentials match the Docker container initialization
+        horizon_mongodb_username: "{{ lookup('env', 'HORIZON_MONGODB_USERNAME') | default('admin', true) }}"
+        horizon_mongodb_password: "{{ lookup('env', 'HORIZON_MONGODB_PASSWORD') | default('evertrust123', true) }}"
         horizon_mongodb_hostname: mongodb-database
         horizon_mongodb_ip: mongodb-database
 
@@ -93,14 +152,45 @@ provisioner:
           - hostname: horizon-node2
             ip: horizon-node2
 
-        # Pekko/Akka cluster communication ports
-        horizon_pekko_discovery_port: 7626
-        horizon_pekko_artery_port: 17335
+        # Tinkey KMS - requires horizon_version >= 2.8
+        # Soft mode by default (horizon_version < 2.8 always uses soft mode regardless of URI)
+        # Set HORIZON_TINK_MASTER_KEY_URI and HORIZON_TINK_CREDENTIALS_SRC_PATH env vars to enable KMS/HSM mode
+        horizon_tink_master_key_uri: "{{ lookup('env', 'HORIZON_TINK_MASTER_KEY_URI') | default('', true) }}"
+        horizon_tink_credentials_src_path: "{{ lookup('env', 'HORIZON_TINK_CREDENTIALS_SRC_PATH') | default('', true) }}"
+        horizon_tink_credentials_path: "{{ lookup('env', 'HORIZON_TINK_CREDENTIALS_PATH') | default('/opt/horizon/etc/tink-credentials.json', true) }}"
 
-        # Load balancer configuration
-        horizon_use_load_balancer: false
-        horizon_load_balancer_hostname: load_balancer
-        horizon_load_balancer_ip: load_balancer
+        # Extra allowed hosts for local testing (port-mapped access via localhost)
+        # nginx forwards $host (no port), so entries must be portless.
+        # root.horizon.test gives the root tenant a named URL: any FQDN that
+        # is not a tenant vhost lands on the default (root) vhost.
+        horizon_extra_allowed_hosts:
+          - "127.0.0.1"
+          - "localhost"
+          - "root.horizon.test"
+
+        # Multi-tenancy: exercises tenant vhost rendering and API provisioning.
+        # The licence file is supplied locally / via HORIZON_LICENCE_PATH and
+        # must carry the multitenant entitlement.  Never commit customer licences.
+        # .test TLD on purpose: .local is reserved for mDNS and macOS browsers
+        # resolve it via Bonjour, ignoring /etc/hosts entries.
+        horizon_tenants:
+          - name: tenant1
+            hostname: tenant1.horizon.test
+          - name: tenant2
+            hostname: tenant2.horizon.test
+
+        horizon_licence_check: true
+        horizon_create_tenants: true
+
+        # No client-cert request in the TLS handshake: avoids the browser
+        # certificate picker when testing the UI from the host machine
+        horizon_nginx_ssl_verify_client: "off"
+
+        # Akka cluster communication ports
+        horizon_akka_discovery_port: 7626
+        horizon_akka_artery_port: 17355
+        horizon_internal_api_port: 9000
+
 
 verifier:
   name: ansible
@@ -109,7 +199,6 @@ scenario:
   name: default
   test_sequence:
     - dependency
-    - cleanup
     - destroy
     - syntax
     - create
@@ -117,5 +206,7 @@ scenario:
     - converge
     - idempotence
     - verify
-    - cleanup
+    - destroy
+  destroy_sequence:
+    - dependency
     - destroy

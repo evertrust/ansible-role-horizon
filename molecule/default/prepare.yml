@@ -11,6 +11,25 @@
   hosts: mongodb
   gather_facts: false
   tasks:
-    - name: Wait for MongoDB to start
-      ansible.builtin.pause:
-        seconds: 10
+    - name: Wait for MongoDB to be ready
+      delegate_to: localhost
+      ansible.builtin.command: >
+        docker exec mongodb-database mongosh
+        "mongodb://admin:evertrust123@localhost:27017/admin"
+        --eval "db.adminCommand('ping')"
+        --quiet
+      register: mongo_ready
+      until: mongo_ready.rc == 0
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    - name: Create application MongoDB user
+      delegate_to: localhost
+      ansible.builtin.command: >
+        docker exec mongodb-database mongosh
+        "mongodb://admin:evertrust123@localhost:27017/admin"
+        --eval "try { db.createUser({ user: '{{ horizon_mongodb_username }}', pwd: '{{ horizon_mongodb_password }}', roles: [{ role: 'readWriteAnyDatabase', db: 'admin' }] }) } catch(e) { if (e.code !== 51003) throw e }"
+        --quiet
+      when: horizon_mongodb_username != 'admin'
+      ignore_errors: true

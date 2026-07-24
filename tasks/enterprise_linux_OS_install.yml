@@ -1,31 +1,42 @@
 ---
 
 - name: Enterprise_linux_OS_install - Install prerequisites packages
-  ansible.builtin.yum:
+  ansible.builtin.dnf:
     name: "{{ horizon_dependencies_list }}"
     state: present
     update_cache: true
 
 - name: Enterprise_linux_OS_install - Check SELinux status
-  command: getenforce
+  ansible.builtin.command: getenforce
   register: selinux_status
-  changed_when: false  # This command does not change system state
+  changed_when: false
 
-- name: Enterprise_linux_OS_install - Set SELinux  if it is enforcing
-  command: setsebool -P httpd_can_network_connect 1 # Allow httpd to make network connections, which is needed for accessing Horizon's UI 
-  when: selinux_status['stdout'] == "Enforcing"
+- name: Enterprise_linux_OS_install - Allow nginx network connections when SELinux is enabled
+  ansible.posix.seboolean:
+    name: httpd_can_network_connect
+    state: true
+    persistent: true
+  when: selinux_status.stdout != "Disabled"
 
-- name: Enterprise_linux_OS_install - Check if Horizon RPM is already installed
-  ansible.builtin.stat:
-    path: /opt/horizon
-  register: horizon_installed
+- name: Enterprise_linux_OS_install - Query installed Horizon package version
+  ansible.builtin.command:
+    argv: [rpm, -q, --qf, '%{VERSION}', horizon]
+  register: horizon_installed_version
+  changed_when: false
+  failed_when: false
+
+- name: Enterprise_linux_OS_install - Determine whether the requested Horizon version is installed
+  ansible.builtin.set_fact:
+    horizon_rpm_needs_install: >-
+      {{ horizon_installed_version.rc != 0
+         or horizon_installed_version.stdout | trim != (horizon_version.split('-')[0]) }}
 
 - name: Enterprise_linux_OS_install - Temporary directory creation
   ansible.builtin.tempfile:
     state: directory
     prefix: horizon_
   register: horizon_temp_install_directory
-  when: not horizon_installed.stat.exists  # Only create if not installed
+  when: horizon_rpm_needs_install
 
 - name: Enterprise_linux_OS_install - Download Horizon's rpm
   ansible.builtin.get_url:
@@ -33,38 +44,265 @@
     dest: "{{ horizon_temp_install_directory['path'] }}"
     username: "{{ horizon_repository_username }}"
     password: '{{ horizon_repository_password }}'
-  when: not horizon_installed.stat.exists  # Only download if not installed
+    checksum: "{{ horizon_pkg_checksum | default(omit, true) }}"
+    timeout: 60
+  register: horizon_rpm_download
+  until: horizon_rpm_download is succeeded
+  retries: 3
+  delay: 5
+  when: horizon_rpm_needs_install
 
 - name: Enterprise_linux_OS_install - Install Horizon's rpm
-  ansible.builtin.yum:
+  ansible.builtin.dnf:
     name: "{{ [ horizon_temp_install_directory['path'], (horizon_pkg_uri | basename) ] | path_join }}"
     state: present
-    disable_gpg_check: yes
+    allow_downgrade: true
+    disable_gpg_check: "{{ horizon_pkg_disable_gpg_check | bool or horizon_disable_gpg_check | bool }}"
   become: true
-  when: not horizon_installed.stat.exists  # Only install if not installed
+  when: horizon_rpm_needs_install
 
-- name: Enterprise_linux_OS_install - Check if mongosh is already installed
+- name: Enterprise_linux_OS_install - Check if Tinkey is already installed
   ansible.builtin.stat:
-    path: /usr/bin/mongosh
-  register: mongosh_installed
+    path: /opt/evertrust/tinkey/bin/tinkey
+  register: tinkey_installed
+  when: (horizon_version.split('-')[0]) is version('2.8', '>=')
 
-- name: Enterprise_linux_OS_install - Create temp directory for mongosh
+- name: Enterprise_linux_OS_install - Resolve latest Tinkey version from repository
+  ansible.builtin.uri:
+    url: "{{ horizon_tinkey_search_uri }}"
+    url_username: "{{ horizon_repository_username }}"
+    url_password: "{{ horizon_repository_password }}"
+    force_basic_auth: true
+    return_content: true
+  register: tinkey_latest_query
+  delegate_to: localhost
+  become: false
+  failed_when: false
+  when:
+    - (horizon_version.split('-')[0]) is version('2.8', '>=')
+    - not tinkey_installed.stat.exists
+    - horizon_tinkey_version == 'latest'
+
+# Nexus result ordering is not reliable for semantic versions (a lexical
+# sort puts 1.9 above 1.13), so the newest version is picked with a real
+# version comparison over every returned asset instead of taking the first.
+- name: Enterprise_linux_OS_install - Set resolved Tinkey version
+  ansible.builtin.set_fact:
+    horizon_tinkey_version: >-
+      {{ item if horizon_tinkey_version == 'latest'
+              or item is version(horizon_tinkey_version, '>')
+         else horizon_tinkey_version }}
+  vars:
+    tinkey_available_versions: >-
+      {{ (tinkey_latest_query.json['items'] | default([])
+          | map(attribute='path')
+          | map('regex_search', 'tinkey-([0-9][0-9.]*)-1\.noarch\.rpm', '\1')
+          | select() | map('first') | list)
+         if (tinkey_latest_query.status | default(0)) == 200 else [] }}
+  loop: "{{ tinkey_available_versions }}"
+  when:
+    - (horizon_version.split('-')[0]) is version('2.8', '>=')
+    - not tinkey_installed.stat.exists
+
+- name: Enterprise_linux_OS_install - Fall back to pinned Tinkey version if lookup failed
+  ansible.builtin.set_fact:
+    horizon_tinkey_version: "{{ horizon_tinkey_fallback_version }}"
+  when:
+    - (horizon_version.split('-')[0]) is version('2.8', '>=')
+    - not tinkey_installed.stat.exists
+    - horizon_tinkey_version == 'latest'
+
+- name: Enterprise_linux_OS_install - Show Tinkey version to install
+  ansible.builtin.debug:
+    msg: >-
+      Tinkey version: {{ horizon_tinkey_version }}
+      {{ '(latest from repository)' if (tinkey_latest_query.status | default(0)) == 200
+         and (tinkey_latest_query.json['items'] | default([]) | length > 0)
+         else '(fallback - latest lookup failed)' if tinkey_latest_query is not skipped
+         else '(pinned)' }}
+  when:
+    - (horizon_version.split('-')[0]) is version('2.8', '>=')
+    - not tinkey_installed.stat.exists
+
+- name: Enterprise_linux_OS_install - Create temp directory for Tinkey
   ansible.builtin.tempfile:
     state: directory
-    prefix: horizon_mongosh_
-  register: horizon_mongosh_temp_directory
-  when: not mongosh_installed.stat.exists
+    prefix: horizon_tinkey_
+  register: horizon_tinkey_temp_directory
+  when:
+    - (horizon_version.split('-')[0]) is version('2.8', '>=')
+    - not tinkey_installed.stat.exists
+
+- name: Enterprise_linux_OS_install - Download Tinkey RPM
+  ansible.builtin.get_url:
+    url: "{{ horizon_tinkey_pkg_uri }}"
+    dest: "{{ [ horizon_tinkey_temp_directory['path'], (horizon_tinkey_pkg_uri | basename) ] | path_join }}"
+    username: "{{ horizon_repository_username }}"
+    password: '{{ horizon_repository_password }}'
+    checksum: "{{ horizon_tinkey_pkg_checksum | default(omit, true) }}"
+    timeout: 60
+  register: tinkey_rpm_download
+  until: tinkey_rpm_download is succeeded
+  retries: 3
+  delay: 5
+  when:
+    - (horizon_version.split('-')[0]) is version('2.8', '>=')
+    - not tinkey_installed.stat.exists
+
+# Tinkey launches with `java -jar`, and Horizon 2.10 no longer installs a JVM
+# automatically. Install it unconditionally so hosts with an existing Tinkey
+# installation are repaired too.
+- name: Enterprise_linux_OS_install - Install Java runtime for Tinkey
+  ansible.builtin.dnf:
+    name: "{{ horizon_tinkey_java_package }}"
+    state: present
+  when: (horizon_version.split('-')[0]) is version('2.8', '>=')
+
+# No skip_broken: a dependency resolution failure must fail loudly, not
+# install a broken tinkey
+- name: Enterprise_linux_OS_install - Install Tinkey RPM
+  ansible.builtin.dnf:
+    name: "{{ [ horizon_tinkey_temp_directory['path'], (horizon_tinkey_pkg_uri | basename) ] | path_join }}"
+    state: present
+    disable_gpg_check: "{{ horizon_tinkey_disable_gpg_check | bool or horizon_disable_gpg_check | bool }}"
+  when:
+    - (horizon_version.split('-')[0]) is version('2.8', '>=')
+    - not tinkey_installed.stat.exists
+
+# Horizon CLI RPMs are only published for x86_64 on the Evertrust repository
+- name: Enterprise_linux_OS_install - Notice when Horizon CLI is skipped on this architecture
+  ansible.builtin.debug:
+    msg: >-
+      horizon-cli RPMs are only published for x86_64; skipping installation
+      on {{ ansible_facts['architecture'] }}.
+  when:
+    - horizon_cli_install
+    - ansible_facts['architecture'] != 'x86_64'
+
+- name: Enterprise_linux_OS_install - Install Horizon CLI
+  when:
+    - horizon_cli_install
+    - ansible_facts['architecture'] == 'x86_64'
+  block:
+    - name: Enterprise_linux_OS_install - Check if Horizon CLI is already installed
+      ansible.builtin.stat:
+        path: /opt/horizon/bin/horizon-cli
+      register: horizon_cli_installed
+
+    - name: Enterprise_linux_OS_install - Resolve latest Horizon CLI version from repository
+      ansible.builtin.uri:
+        url: "{{ horizon_cli_search_uri }}"
+        url_username: "{{ horizon_repository_username }}"
+        url_password: "{{ horizon_repository_password }}"
+        force_basic_auth: true
+        return_content: true
+      register: horizon_cli_latest_query
+      delegate_to: localhost
+      become: false
+      failed_when: false
+      when:
+        - not horizon_cli_installed.stat.exists
+        - horizon_cli_version == 'latest'
+
+    # Same rationale as Tinkey: Nexus result ordering is not reliable for
+    # semantic versions, pick the newest with a real version comparison.
+    - name: Enterprise_linux_OS_install - Set resolved Horizon CLI version
+      ansible.builtin.set_fact:
+        horizon_cli_version: >-
+          {{ item if horizon_cli_version == 'latest'
+                  or item is version(horizon_cli_version, '>')
+             else horizon_cli_version }}
+      vars:
+        horizon_cli_available_versions: >-
+          {{ (horizon_cli_latest_query.json['items'] | default([])
+              | map(attribute='path')
+              | map('regex_search', 'horizon-cli-([0-9][0-9.]*)-1\.x86_64\.rpm', '\1')
+              | select() | map('first') | list)
+             if (horizon_cli_latest_query.status | default(0)) == 200 else [] }}
+      loop: "{{ horizon_cli_available_versions }}"
+      when: not horizon_cli_installed.stat.exists
+
+    - name: Enterprise_linux_OS_install - Fall back to pinned Horizon CLI version if lookup failed
+      ansible.builtin.set_fact:
+        horizon_cli_version: "{{ horizon_cli_fallback_version }}"
+      when:
+        - not horizon_cli_installed.stat.exists
+        - horizon_cli_version == 'latest'
+
+    - name: Enterprise_linux_OS_install - Show Horizon CLI version to install
+      ansible.builtin.debug:
+        msg: >-
+          Horizon CLI version: {{ horizon_cli_version }}
+          {{ '(latest from repository)' if (horizon_cli_latest_query.status | default(0)) == 200
+             and (horizon_cli_latest_query.json['items'] | default([]) | length > 0)
+             else '(fallback - latest lookup failed)' if horizon_cli_latest_query is not skipped
+             else '(pinned)' }}
+      when: not horizon_cli_installed.stat.exists
+
+    - name: Enterprise_linux_OS_install - Create temp directory for Horizon CLI
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: horizon_cli_
+      register: horizon_cli_temp_directory
+      when: not horizon_cli_installed.stat.exists
+
+    - name: Enterprise_linux_OS_install - Download Horizon CLI RPM
+      ansible.builtin.get_url:
+        url: "{{ horizon_cli_pkg_uri }}"
+        dest: "{{ [ horizon_cli_temp_directory['path'], (horizon_cli_pkg_uri | basename) ] | path_join }}"
+        username: "{{ horizon_repository_username }}"
+        password: '{{ horizon_repository_password }}'
+        checksum: "{{ horizon_cli_pkg_checksum | default(omit, true) }}"
+        timeout: 60
+      register: horizon_cli_rpm_download
+      until: horizon_cli_rpm_download is succeeded
+      retries: 3
+      delay: 5
+      when: not horizon_cli_installed.stat.exists
+
+    - name: Enterprise_linux_OS_install - Install Horizon CLI RPM
+      ansible.builtin.dnf:
+        name: "{{ [ horizon_cli_temp_directory['path'], (horizon_cli_pkg_uri | basename) ] | path_join }}"
+        state: present
+        disable_gpg_check: "{{ horizon_cli_disable_gpg_check | bool or horizon_disable_gpg_check | bool }}"
+      when: not horizon_cli_installed.stat.exists
+
+- name: Enterprise_linux_OS_install - Check if mongosh is already installed
+  ansible.builtin.shell: rpm -qa | grep -qi mongosh
+  register: mongosh_installed
+  changed_when: false
+  failed_when: false
+  args:
+    executable: /bin/bash
+
+- name: Enterprise_linux_OS_install - Ensure mongosh install directory exists
+  ansible.builtin.file:
+    path: /tmp/horizon-mongosh-install
+    state: directory
+    mode: '0755'
+  when: mongosh_installed.rc != 0
 
 - name: Enterprise_linux_OS_install - Download mongodb-mongosh RPM
   ansible.builtin.get_url:
     url: "{{ horizon_mongodb_shell_package_uri }}"
-    dest: "{{ [ horizon_mongosh_temp_directory['path'], (horizon_mongodb_shell_package_uri | basename) ] | path_join }}"
-  when: not mongosh_installed.stat.exists
+    dest: "/tmp/horizon-mongosh-install/{{ horizon_mongodb_shell_package_uri | basename }}"
+    checksum: "{{ horizon_mongodb_shell_package_checksum | default(omit, true) }}"
+    timeout: 60
+  register: mongosh_rpm_download
+  until: mongosh_rpm_download is succeeded
+  retries: 3
+  delay: 5
+  when: mongosh_installed.rc != 0
+
+- name: Enterprise_linux_OS_install - Import MongoDB RPM signing key
+  ansible.builtin.rpm_key:
+    key: "{{ horizon_mongodb_shell_gpgkey }}"
+    state: present
+  when: mongosh_installed.rc != 0
 
 - name: Enterprise_linux_OS_install - Install Mongosh RPMs
-  ansible.builtin.yum:
-    name: "{{ [ horizon_mongosh_temp_directory['path'], (horizon_mongodb_shell_package_uri | basename) ] | path_join }}"
+  ansible.builtin.dnf:
+    name: "/tmp/horizon-mongosh-install/{{ horizon_mongodb_shell_package_uri | basename }}"
     state: present
-    disable_gpg_check: yes
-    skip_broken: yes
-  when: not mongosh_installed.stat.exists
+    disable_gpg_check: "{{ horizon_mongodb_shell_disable_gpg_check | bool or horizon_disable_gpg_check | bool }}"
+  when: mongosh_installed.rc != 0

@@ -1,6 +1,6 @@
 ---
 - name: Uninstall Horizon
-  hosts: horizon_cluster
+  hosts: horizon_nodes
   become: true
   gather_facts: true
   
@@ -9,24 +9,51 @@
       ansible.builtin.systemd:
         name: horizon
         state: stopped
-      ignore_errors: yes
+      ignore_errors: true
     
     - name: Stop nginx service
       ansible.builtin.systemd:
         name: nginx
         state: stopped
-      ignore_errors: yes
+      ignore_errors: true
     
     - name: Stop postfix service
       ansible.builtin.systemd:
         name: postfix
         state: stopped
-      ignore_errors: yes
+      ignore_errors: true
     
     - name: Remove Horizon RPM
-      ansible.builtin.yum:
+      ansible.builtin.dnf:
         name: horizon
         state: absent
+
+    - name: Reload systemd daemon
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Reset failed state of horizon service
+      ansible.builtin.command: systemctl reset-failed horizon
+      ignore_errors: true
+      changed_when: false
+
+    - name: Remove Tinkey RPM
+      ansible.builtin.dnf:
+        name: tinkey
+        state: absent
+      ignore_errors: true
+
+    - name: Remove Horizon CLI RPM
+      ansible.builtin.dnf:
+        name: horizon-cli
+        state: absent
+      ignore_errors: true
+
+    - name: Remove Mongosh RPM
+      ansible.builtin.dnf:
+        name: mongodb-mongosh
+        state: absent
+      ignore_errors: true
     
     - name: Remove Horizon directories
       ansible.builtin.file:
@@ -34,7 +61,9 @@
         state: absent
       loop:
         - /opt/horizon
+        - /opt/evertrust
         - /etc/default/horizon
+        - /etc/default/horizon.rpmsave
         - /etc/nginx/conf.d/horizon.conf
         - /etc/nginx/ssl/horizon.key
         - /etc/nginx/ssl/horizon.pem
@@ -42,22 +71,19 @@
         - /etc/nginx/ssl/horizon-chain.pem
     
     - name: Remove Horizon entries from /etc/hosts
-      ansible.builtin.lineinfile:
+      ansible.builtin.blockinfile:
         path: /etc/hosts
-        regexp: "{{ item }}"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - Horizon Cluster"
         state: absent
-      loop:
-        - "horizon-node"
-        - "mongodb"
     
     - name: Remove firewall rules
       ansible.posix.firewalld:
         port: "{{ item }}"
-        permanent: yes
+        permanent: true
         state: disabled
-        immediate: yes
+        immediate: true
       loop:
         - 443/tcp
         - 7626/tcp
-        - 17335/tcp
-      ignore_errors: yes
+        - 17355/tcp
+      ignore_errors: true

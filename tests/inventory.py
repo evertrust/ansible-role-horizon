@@ -57,9 +57,9 @@ def build_inventory(vars_data):
     """Build the Ansible inventory structure from vars data."""
     inventory = {
         'all': {
-            'children': ['horizon_cluster']
+            'children': ['horizon_nodes']
         },
-        'horizon_cluster': {
+        'horizon_nodes': {
             'hosts': [],
             'vars': {
                 'ansible_user': 'root',
@@ -102,7 +102,7 @@ def build_inventory(vars_data):
             print(f"Warning: Node {hostname} missing IP address", file=sys.stderr)
             continue
         
-        inventory['horizon_cluster']['hosts'].append(hostname)
+        inventory['horizon_nodes']['hosts'].append(hostname)
         inventory['_meta']['hostvars'][hostname] = {
             'ansible_host': ip
         }

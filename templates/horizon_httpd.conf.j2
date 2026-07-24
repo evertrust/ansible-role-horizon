@@ -1,0 +1,106 @@
+{#
+  Role-managed nginx configuration for Horizon.
+  Replaces the symlink to the packaged /opt/horizon/etc/horizon-httpd.conf so that
+  multi-tenant vhosts can be rendered. Based on packaging/linux/conf/httpd.conf
+  from the Horizon distribution.
+
+  - Default vhost (catch-all): instance scope (administration in multi-tenant mode).
+  - One vhost per entry in horizon_tenants: routes to the tenant by setting
+    the X-Tenant header (tenant selection mechanism of Horizon >= 2.9).
+
+  NOTE: proxy_set_header directives are NOT inherited as soon as a block defines
+  one of its own, so every server block repeats the full header set.
+#}
+upstream horizon {
+  server 127.0.0.1:{{ horizon_internal_api_port }};
+}
+
+{# In HA mode the Pekko management endpoint binds to the node hostname
+   (see AKKA_MANAGEMENT_LOCAL handling in the packaged service-customization.sh),
+   not to 127.0.0.1 - the packaged nginx config gets this wrong #}
+upstream horizon-management {
+  server {{ horizon_hostname_node if horizon_nodes | length > 1 else '127.0.0.1' }}:{{ horizon_akka_discovery_port }};
+}
+
+proxy_buffering    off;
+proxy_http_version 1.1;
+
+{% macro proxy_headers() %}
+proxy_set_header   SSL_CLIENT_CERT $ssl_client_escaped_cert;
+proxy_set_header   X-Real-IP $remote_addr;
+proxy_set_header   X-Forwarded-Proto $scheme;
+proxy_set_header   X-Forwarded-Host $host;
+proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header   Host $host;
+{%- endmacro %}
+{% macro server_common() %}
+server_tokens off;
+
+proxy_hide_header X-Frame-Options;
+add_header X-Frame-Options "SAMEORIGIN";
+
+ssl_certificate           {{ [horizon_cert_directory_path, 'horizon-chain.pem'] | path_join }};
+ssl_certificate_key       {{ [horizon_cert_directory_path, 'horizon.key'] | path_join }};
+ssl_session_timeout       10m;
+ssl_session_cache         shared:SSL:10m;
+ssl_protocols             TLSv1.2 TLSv1.3;
+ssl_ciphers               EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH:!SHA;
+ssl_prefer_server_ciphers on;
+{# optional_no_ca (packaged default) makes nginx request a client certificate
+   during the TLS handshake: browsers holding client identities then show a
+   certificate picker on every connection. Set horizon_nginx_ssl_verify_client
+   to "off" when X.509 client-certificate authentication is not needed. #}
+ssl_verify_client         {{ horizon_nginx_ssl_verify_client }};
+ssl_verify_depth          10;
+
+client_header_buffer_size   64k;
+large_client_header_buffers 4 64k;
+
+rewrite ^/$ /ui#/ra redirect;
+
+location /ready {
+  access_log off;
+  proxy_pass http://horizon-management;
+}
+{%- endmacro %}
+
+# Default vhost: instance scope{{ ' (administration)' if horizon_tenants | length > 0 else '' }}
+server {
+  listen       443 ssl default_server;
+  server_name  _;
+
+  {{ server_common() | trim | indent(2) }}
+
+  access_log /var/log/nginx/horizon-access.log;
+  error_log  /var/log/nginx/horizon-error.log;
+
+  location / {
+    {{ proxy_headers() | trim | indent(4) }}
+{% if not horizon_tenant_header_passthrough %}
+    # Strip client-supplied X-Tenant: tenant selection only via tenant vhosts.
+    # Applied even with no tenant configured: with a multitenant licence
+    # Horizon honours the header, so it must never come from the client.
+    proxy_set_header   X-Tenant "";
+{% endif %}
+    proxy_pass http://horizon;
+  }
+}
+{% for tenant in horizon_tenants %}
+
+# Tenant vhost: {{ tenant.name }}
+server {
+  listen       443 ssl;
+  server_name  {{ tenant.hostname }};
+
+  {{ server_common() | trim | indent(2) }}
+
+  access_log /var/log/nginx/horizon-{{ tenant.name }}-access.log;
+  error_log  /var/log/nginx/horizon-{{ tenant.name }}-error.log;
+
+  location / {
+    {{ proxy_headers() | trim | indent(4) }}
+    proxy_set_header   X-Tenant "{{ tenant.name }}";
+    proxy_pass http://horizon;
+  }
+}
+{% endfor %}
